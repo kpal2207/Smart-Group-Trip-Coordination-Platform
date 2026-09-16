@@ -1,0 +1,1 @@
+# Smart-Group-Trip-Coordination-Platform
