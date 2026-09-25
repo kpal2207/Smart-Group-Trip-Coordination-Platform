@@ -12,6 +12,7 @@ const Home = () => {
     <div className="dashboard-container">
       <header className="dashboard-header">
         <h1>Welcome, {user?.name || 'Traveler'}!</h1>
+        <p style={{ color: 'var(--text-muted)' }}>{user?.email}</p>
       </header>
 
       <div className="dashboard-grid">

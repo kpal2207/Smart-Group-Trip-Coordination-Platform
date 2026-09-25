@@ -3,11 +3,11 @@
 # Install: pip install -r requirements.txt
 
 # Web framework
-fastapi>=0.115.0
+fastapi==0.115.6
 uvicorn[standard]>=0.30.6
 
 # Database
-sqlalchemy>=2.0.35
+sqlalchemy==2.0.52
 psycopg2-binary>=2.9.9
 alembic>=1.13.2
 
@@ -16,7 +16,8 @@ pwdlib[argon2]>=0.2.1
 python-jose[cryptography]>=3.3.0
 
 # Validation & Settings
-pydantic[email-validator]>=2.9.2
+pydantic>=2.9.2
+email-validator>=2.0.0
 pydantic-settings>=2.5.2
 python-dotenv>=1.0.1
 
