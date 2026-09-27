@@ -1,0 +1,33 @@
+# Docker Compose — PostgreSQL for Development
+# ==============================================
+# This provides a consistent PostgreSQL database for all team members.
+#
+# Usage:
+#   Start:  docker compose up -d
+#   Stop:   docker compose down
+#   Reset:  docker compose down -v   (WARNING: deletes all data)
+#   Logs:   docker compose logs -f db
+#
+# The database will be accessible at:
+#   Host:     localhost
+#   Port:     5432
+#   Database: tripmanager
+#   User:     tripuser
+#   Password: trippass   (development only — never use in production)
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: tripmanager-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: tripmanager
+      POSTGRES_USER: tripuser
+      POSTGRES_PASSWORD: trippass
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
