@@ -13,6 +13,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.models.user import User  # noqa: F401 — ensures model is registered
+from app.models.trip import Trip, TripMember  # noqa: F401 — ensures models are registered
 from app.services.auth import hash_password
 
 # ---------------------------------------------------------------------------
@@ -97,6 +98,31 @@ def auth_header(client, test_user):
     response = client.post(
         "/auth/login",
         json={"email": "test@example.com", "password": "Test1234!"},
+    )
+    token = response.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def second_user(db):
+    """Create and return a second test user in the database."""
+    user = User(
+        name="Second User",
+        email="second@example.com",
+        password_hash=hash_password("Test1234!"),
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@pytest.fixture
+def auth_header_second(client, second_user):
+    """Login the second user and return an Authorization header dict."""
+    response = client.post(
+        "/auth/login",
+        json={"email": "second@example.com", "password": "Test1234!"},
     )
     token = response.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
