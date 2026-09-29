@@ -20,6 +20,7 @@ const Navbar = () => {
         <div className="navbar-links">
           {isAuthenticated ? (
             <>
+              <Link to="/trips" className="btn btn-text">My Trips</Link>
               <span className="navbar-user">Hello, {user?.name || 'User'}</span>
               <button onClick={handleLogout} className="btn btn-secondary btn-sm">
                 Logout

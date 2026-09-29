@@ -1,11 +1,13 @@
 import React, { useContext } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 
 const Home = () => {
   const { user } = useContext(AuthContext);
+  const navigate = useNavigate();
 
   const notImplemented = () => {
-    alert("This feature will be available when the Trip module is integrated.");
+    alert("This feature will be available when the Expense module is integrated.");
   };
 
   return (
@@ -19,8 +21,15 @@ const Home = () => {
         <section className="dashboard-section">
           <h2>Trip Management</h2>
           <div className="btn-group">
-            <button className="btn btn-primary" onClick={notImplemented}>Create Trip</button>
-            <button className="btn btn-secondary" onClick={notImplemented}>Join Trip</button>
+            <button className="btn btn-primary" onClick={() => navigate('/trips/create')}>
+              Create Trip
+            </button>
+            <button className="btn btn-secondary" onClick={() => navigate('/trips/join')}>
+              Join Trip
+            </button>
+            <button className="btn btn-secondary" onClick={() => navigate('/trips')}>
+              My Trips
+            </button>
           </div>
         </section>
 
