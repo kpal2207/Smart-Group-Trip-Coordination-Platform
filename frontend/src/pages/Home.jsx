@@ -36,7 +36,9 @@ const Home = () => {
         <section className="dashboard-section">
           <h2>Expense Management</h2>
           <div className="btn-group">
-            <button className="btn btn-primary" onClick={notImplemented}>Manage Expenses</button>
+            <button className="btn btn-primary" onClick={() => navigate('/trips')}>
+              Manage Expenses
+            </button>
           </div>
         </section>
 
