@@ -12,8 +12,9 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
-from app.models.user import User  # noqa: F401 — ensures model is registered
-from app.models.trip import Trip, TripMember  # noqa: F401 — ensures models are registered
+from app.models.user import User  # noqa: F401
+from app.models.trip import Trip, TripMember  # noqa: F401
+import app.models  # noqa: F401 — registers all models including expenses for Base.metadata
 from app.services.auth import hash_password
 
 # ---------------------------------------------------------------------------

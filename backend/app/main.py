@@ -12,7 +12,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
-from app.routers import auth, trip
+from app.routers import auth, trip, expense
+import app.models  # noqa: F401 - ensures all models registered for Base.metadata
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +64,7 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 app.include_router(auth.router)
 app.include_router(trip.router)
+app.include_router(expense.router)
 
 
 # ---------------------------------------------------------------------------

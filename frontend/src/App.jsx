@@ -11,7 +11,10 @@ import MyTrips from './pages/MyTrips';
 import CreateTrip from './pages/CreateTrip';
 import JoinTrip from './pages/JoinTrip';
 import TripDetails from './pages/TripDetails';
+import ExpenseDashboard from './pages/ExpenseDashboard';
+import AddExpense from './pages/AddExpense';
 import './styles/trip.css';
+import './styles/expense.css';
 
 const App = () => {
   return (
@@ -59,6 +62,18 @@ const App = () => {
               <>
                 <Navbar />
                 <TripDetails />
+              </>
+            } />
+            <Route path="/trips/:tripId/expenses" element={
+              <>
+                <Navbar />
+                <ExpenseDashboard />
+              </>
+            } />
+            <Route path="/trips/:tripId/expenses/add" element={
+              <>
+                <Navbar />
+                <AddExpense />
               </>
             } />
           </Route>

@@ -104,6 +104,9 @@ const TripDetails = () => {
           <p style={{ color: 'var(--text-muted)' }}>📍 {trip.destination}</p>
         </div>
         <div className="page-header-actions">
+          <Link to={`/trips/${trip.id}/expenses`} className="btn btn-primary btn-sm">
+            💰 Expenses & Splits
+          </Link>
           <Link to="/trips" className="btn btn-secondary btn-sm">
             &larr; Back to My Trips
           </Link>
