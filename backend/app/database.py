@@ -2,8 +2,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from app.config import settings
 
-# Create the SQLAlchemy engine. We use a synchronous engine for simplicity.
-engine = create_engine(settings.DATABASE_URL)
+# Create the SQLAlchemy engine. Supports SQLite (for local testing/dev) and PostgreSQL.
+connect_args = {"check_same_thread": False} if settings.DATABASE_URL.startswith("sqlite") else {}
+engine = create_engine(settings.DATABASE_URL, connect_args=connect_args)
 
 # SessionLocal is a factory for generating new database sessions.
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
