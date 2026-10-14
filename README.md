@@ -60,7 +60,8 @@ A collaborative trip management platform built for university group projects. Cr
 | Auth + Home Page | Ruhan, Jay | `feature/auth` |
 | Trip Generation + Joining | Mrunali, Kanika | `feature/trip` |
 | Expense Management | Rahul, Kavish | `feature/expense` |
-| Code Review & Integration | Kaushal, Bhavin, Parth, Manthan | — |
+| Concept Poster & SRS Documentation | Manthan | Documents |
+| Code Review & Integration | Kaushal, Bhavin, Parth | — |
 
 ---
 
