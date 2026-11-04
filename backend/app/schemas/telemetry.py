@@ -6,6 +6,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class TelemetryPingCreate(BaseModel):
+    """A member's submitted GPS ping; invalid sensor values return HTTP 422."""
+
     latitude: float = Field(ge=-90, le=90, description="Latitude in decimal degrees.")
     longitude: float = Field(ge=-180, le=180, description="Longitude in decimal degrees.")
     speed_kmh: float = Field(ge=0, description="Ground speed in kilometres per hour.")
@@ -14,11 +16,13 @@ class TelemetryPingCreate(BaseModel):
 
 
 class TelemetryPingResponse(BaseModel):
+    """Stored ping response; Ghost Mode coordinates are always null."""
+
     id: int
     trip_id: int
     user_id: int
-    latitude: float
-    longitude: float
+    latitude: float | None
+    longitude: float | None
     speed_kmh: float
     heading: float | None
     is_ghost_mode: bool
@@ -28,6 +32,8 @@ class TelemetryPingResponse(BaseModel):
 
 
 class ConvoyLocationResponse(BaseModel):
+    """Latest member location, including explicit freshness and privacy state."""
+
     user_id: int
     name: str
     latitude: float | None
