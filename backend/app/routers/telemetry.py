@@ -7,12 +7,22 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies.auth import get_current_user
-from app.models.convoy_telemetry import ConvoyTelemetry
 from app.models.trip import TripMember
 from app.models.user import User
-from app.schemas.telemetry import ConvoyLocationResponse, TelemetryPingCreate, TelemetryPingResponse
+from app.schemas.telemetry import (
+    ConvoyLocationResponse,
+    TelemetryPingCreate,
+    TelemetryPingResponse,
+)
 
 router = APIRouter(prefix="/trips", tags=["Telemetry"])
+
+
+def _telemetry_model():
+    """Import the DBA-owned model when a telemetry request is served."""
+    from app.models.convoy_telemetry import ConvoyTelemetry
+
+    return ConvoyTelemetry
 
 
 def _require_trip_member(db: Session, trip_id: int, user_id: int) -> None:
@@ -41,15 +51,14 @@ def submit_telemetry(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> TelemetryPingResponse:
-    """Persist one validated location ping for the authenticated member.
+    """Persist one validated ping. Identity comes from the token, never body fields.
 
-    Coordinates, speed, and heading are range-checked by the request schema.
-    User and trip IDs always come from authentication and the path, never from
-    the request body. Ghost Mode pings are stored but their coordinates are
-    masked in every API response.
+    Ghost Mode pings are retained, while coordinates are masked in every API
+    response, including the submitting member's acknowledgement.
     """
     _require_trip_member(db, trip_id, current_user.id)
-    ping = ConvoyTelemetry(
+    Telemetry = _telemetry_model()
+    ping = Telemetry(
         trip_id=trip_id,
         user_id=current_user.id,
         latitude=payload.latitude,
@@ -86,48 +95,59 @@ def get_convoy_locations(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[ConvoyLocationResponse]:
-    """Return one row per enrolled trip member, including members without pings.
+    """Return each enrolled member, even when no telemetry ping exists.
 
-    Fresh means at most 60 seconds old; stale means 60 seconds to 5 minutes;
-    older or missing pings are unavailable. Ghost Mode always masks both
-    coordinates and returns the explicit hidden status.
+    Fresh is at most 60 seconds old; stale is 60 seconds to 5 minutes; older
+    or missing pings are unavailable. Ghost Mode always masks both coordinates
+    and returns the explicit hidden status.
     """
     _require_trip_member(db, trip_id, current_user.id)
+    Telemetry = _telemetry_model()
 
     latest_ids = (
         db.query(
-            ConvoyTelemetry.id.label("ping_id"),
+            Telemetry.id.label("ping_id"),
+            Telemetry.user_id.label("user_id"),
             func.row_number()
             .over(
-                partition_by=ConvoyTelemetry.user_id,
-                order_by=(ConvoyTelemetry.recorded_at.desc(), ConvoyTelemetry.id.desc()),
+                partition_by=Telemetry.user_id,
+                order_by=(Telemetry.recorded_at.desc(), Telemetry.id.desc()),
             )
             .label("position"),
         )
-        .filter(ConvoyTelemetry.trip_id == trip_id)
+        .filter(Telemetry.trip_id == trip_id)
         .subquery()
     )
     rows = (
-        db.query(TripMember, User, ConvoyTelemetry)
+        db.query(TripMember, User, Telemetry)
         .join(User, User.id == TripMember.user_id)
         .outerjoin(
             latest_ids,
-            and_(latest_ids.c.ping_id == ConvoyTelemetry.id, latest_ids.c.position == 1),
+            and_(
+                latest_ids.c.user_id == TripMember.user_id,
+                latest_ids.c.position == 1,
+            ),
         )
-        .outerjoin(ConvoyTelemetry, ConvoyTelemetry.id == latest_ids.c.ping_id)
+        .outerjoin(Telemetry, Telemetry.id == latest_ids.c.ping_id)
         .filter(TripMember.trip_id == trip_id)
         .order_by(User.name.asc(), User.id.asc())
         .all()
     )
 
     now = datetime.now(timezone.utc)
-    results: list[ConvoyLocationResponse] = []
+    locations: list[ConvoyLocationResponse] = []
     for _membership, member, ping in rows:
         if ping is None:
-            results.append(ConvoyLocationResponse(
-                user_id=member.id, name=member.name, latitude=None, longitude=None,
-                speed_kmh=None, heading=None, is_ghost_mode=False,
-                location_status="unavailable", recorded_at=None,
+            locations.append(ConvoyLocationResponse(
+                user_id=member.id,
+                name=member.name,
+                latitude=None,
+                longitude=None,
+                speed_kmh=None,
+                heading=None,
+                is_ghost_mode=False,
+                location_status="unavailable",
+                recorded_at=None,
             ))
             continue
 
@@ -144,16 +164,16 @@ def get_convoy_locations(
             else:
                 location_status = "unavailable"
 
-        is_visible = location_status in {"fresh", "stale"}
-        results.append(ConvoyLocationResponse(
+        coordinates_visible = location_status in {"fresh", "stale"}
+        locations.append(ConvoyLocationResponse(
             user_id=member.id,
             name=member.name,
-            latitude=ping.latitude if is_visible else None,
-            longitude=ping.longitude if is_visible else None,
+            latitude=ping.latitude if coordinates_visible else None,
+            longitude=ping.longitude if coordinates_visible else None,
             speed_kmh=ping.speed_kmh,
             heading=ping.heading,
             is_ghost_mode=ping.is_ghost_mode,
             location_status=location_status,
             recorded_at=ping.recorded_at,
         ))
-    return results
+    return locations
