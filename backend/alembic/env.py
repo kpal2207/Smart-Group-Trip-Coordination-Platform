@@ -10,9 +10,9 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 from app.config import settings
 from app.database import Base
-# Import all models here so Alembic can discover them for autogenerate
-from app.models.user import User
-from app.models.trip import Trip, TripMember  # noqa: F401
+# Import the model package before reading Base.metadata so every registered
+# model, including expenses and convoy telemetry, is available to autogenerate.
+import app.models  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
