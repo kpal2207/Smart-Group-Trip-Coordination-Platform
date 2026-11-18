@@ -1432,3 +1432,61 @@
   .landing-nav-links { display: none; }
   .steps-grid { grid-template-columns: 1fr; }
 }
+
+/* Sprint 2 PWA: compact the landing header on phone-sized viewports. */
+@media (max-width: 600px) {
+  .landing-nav {
+    padding: 10px 14px;
+    padding-top: max(10px, env(safe-area-inset-top, 0px));
+  }
+
+  .landing-nav-container {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .landing-brand {
+    min-width: 0;
+    font-size: 1.12rem;
+    gap: 8px;
+  }
+
+  .landing-brand-icon {
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+  }
+
+  .landing-nav-actions {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .landing-nav-actions > * {
+    min-height: 44px;
+    max-width: 100%;
+  }
+
+  .landing-nav-actions button,
+  .landing-nav-actions a {
+    padding: 10px 12px;
+    font-size: 0.9rem;
+  }
+}
+
+@media (max-width: 360px) {
+  .landing-nav-actions {
+    justify-content: space-between;
+  }
+
+  .landing-nav-actions button,
+  .landing-nav-actions a {
+    padding-inline: 9px;
+    font-size: 0.84rem;
+  }
+}

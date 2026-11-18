@@ -289,3 +289,19 @@ a:hover {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* Mobile/PWA ergonomics: preserve existing desktop styling while avoiding
+   viewport overflow and respecting notched-device safe areas. */
+html { min-width: 320px; }
+body { min-width: 320px; overflow-x: hidden; }
+button, .btn, input, select, textarea, a { touch-action: manipulation; }
+button, .btn { min-height: 48px; }
+input, select, textarea { max-width: 100%; }
+.app-layout { padding-bottom: env(safe-area-inset-bottom, 0px); }
+@media (max-width: 600px) {
+  .navbar { padding: 12px 14px; }
+  .navbar-container { flex-wrap: wrap; gap: 10px; }
+  .navbar-links { flex-wrap: wrap; gap: 8px; }
+  .btn { padding: 11px 16px; }
+}
