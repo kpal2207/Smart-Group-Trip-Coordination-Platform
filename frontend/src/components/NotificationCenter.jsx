@@ -1,73 +1,58 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useContext } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Bell, CheckCheck } from 'lucide-react';
 import { getNotifications, markNotificationRead, markAllNotificationsRead } from '../api/expense';
+import { AuthContext } from '../context/AuthContext';
+import { supabase } from '../utils/supabase';
 
-/**
- * NotificationCenter
- * Displays in-app notifications for:
- * - Affected members notified of new expense / share
- * - Host notified of dispute
- * - Members notified of dispute resolution / split update
- * - Affected members notified of settlements and pending balances
- * - All members notified when all balances cleared & trip finished
- */
 const NotificationCenter = () => {
-  const [notifications, setNotifications] = useState([]);
+  const { user } = useContext(AuthContext);
+  const queryClient = useQueryClient();
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef(null);
 
-  const fetchNotifs = async () => {
-    try {
-      const res = await getNotifications();
-      setNotifications(res.data || []);
-    } catch {
-      // ignore in background
-    }
-  };
+  const { data: notifications = [], refetch } = useQuery({
+    queryKey: ['notifications', user?.id],
+    queryFn: () => getNotifications().then((res) => res.data || []),
+    enabled: !!user?.id,
+  });
 
+  // Real-time Supabase push subscription (replaces 15-second polling)
   useEffect(() => {
-    fetchNotifs();
-    const interval = setInterval(fetchNotifs, 15000); // refresh every 15s
-    return () => clearInterval(interval);
-  }, []);
+    if (!supabase || !user?.id) return;
+    const channel = supabase
+      .channel(`notifs:${user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` }, () => {
+        queryClient.invalidateQueries({ queryKey: ['notifications', user.id] });
+      })
+      .subscribe();
 
+    return () => { supabase.removeChannel(channel); };
+  }, [user?.id, queryClient]);
+
+  // Click outside to close
   useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (containerRef.current && !containerRef.current.contains(e.target)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    const handleClick = (e) => containerRef.current && !containerRef.current.contains(e.target) && setIsOpen(false);
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
   const unreadCount = notifications.filter((n) => !n.is_read).length;
 
   const handleToggle = () => {
     setIsOpen(!isOpen);
-    if (!isOpen) {
-      fetchNotifs();
-    }
+    if (!isOpen) refetch();
   };
 
   const handleMarkAllRead = async () => {
-    try {
-      await markAllNotificationsRead();
-      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
-    } catch {
-      // ignore
-    }
+    await markAllNotificationsRead();
+    queryClient.invalidateQueries({ queryKey: ['notifications', user?.id] });
   };
 
   const handleItemClick = async (notif) => {
     if (!notif.is_read) {
-      try {
-        await markNotificationRead(notif.id);
-        setNotifications((prev) =>
-          prev.map((n) => (n.id === notif.id ? { ...n, is_read: true } : n))
-        );
-      } catch {
-        // ignore
-      }
+      await markNotificationRead(notif.id);
+      queryClient.invalidateQueries({ queryKey: ['notifications', user?.id] });
     }
   };
 
@@ -76,11 +61,12 @@ const NotificationCenter = () => {
       <button
         type="button"
         className="btn btn-secondary btn-sm"
-        style={{ position: 'relative', padding: '6px 12px' }}
+        style={{ position: 'relative', padding: '6px 10px', display: 'inline-flex', alignItems: 'center' }}
         onClick={handleToggle}
         title="Notifications"
       >
-        🔔 {unreadCount > 0 && <span className="notif-badge">{unreadCount}</span>}
+        <Bell size={16} />
+        {unreadCount > 0 && <span className="notif-badge">{unreadCount}</span>}
       </button>
 
       {isOpen && (
@@ -91,10 +77,10 @@ const NotificationCenter = () => {
               <button
                 type="button"
                 className="btn btn-text"
-                style={{ fontSize: '0.75rem', padding: '2px 4px' }}
+                style={{ fontSize: '0.75rem', padding: '2px 4px', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
                 onClick={handleMarkAllRead}
               >
-                Mark all read
+                <CheckCheck size={13} /> Mark all read
               </button>
             )}
           </div>

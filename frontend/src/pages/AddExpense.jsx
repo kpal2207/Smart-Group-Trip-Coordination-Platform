@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getTripMembers, addExpense } from '../api/expense';
 import { AuthContext } from '../context/AuthContext';
 import '../styles/expense.css';
@@ -16,9 +17,13 @@ const AddExpense = () => {
   const { tripId } = useParams();
   const navigate = useNavigate();
   const { user } = useContext(AuthContext);
+  const queryClient = useQueryClient();
 
-  const [members, setMembers] = useState([]);
-  const [loadingMembers, setLoadingMembers] = useState(true);
+  const { data: members = [], isLoading: loadingMembers, error: membersError } = useQuery({
+    queryKey: ['tripMembers', tripId],
+    queryFn: () => getTripMembers(tripId).then((r) => r.data || []),
+    enabled: !!tripId,
+  });
 
   // Form inputs
   const [title, setTitle] = useState('');
@@ -36,44 +41,17 @@ const AddExpense = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    const fetchMembers = async () => {
-      setLoadingMembers(true);
-      try {
-        const res = await getTripMembers(tripId);
-        const mems = res.data || [];
-        setMembers(mems);
-
-        // Pre-select current user as payer if in members
-        if (user) {
-          const currentInTrip = mems.find((m) => m.user_id === user.id);
-          if (currentInTrip) {
-            setPayerId(currentInTrip.user_id.toString());
-          } else if (mems.length > 0) {
-            setPayerId(mems[0].user_id.toString());
-          }
-        }
-
-        // Default all members selected for equal split
-        const allIds = mems.map((m) => m.user_id);
-        setSelectedMemberIds(allIds);
-
-        // Initialize empty custom shares
-        const initialCustom = {};
-        mems.forEach((m) => {
-          initialCustom[m.user_id] = '';
-        });
-        setCustomShares(initialCustom);
-      } catch (err) {
-        setApiError('Failed to load trip members. You must be an active member of this trip.');
-      } finally {
-        setLoadingMembers(false);
+    if (members.length > 0) {
+      if (!payerId) {
+        const me = members.find((m) => m.user_id === user?.id);
+        setPayerId((me?.user_id || members[0].user_id).toString());
       }
-    };
-
-    if (tripId) {
-      fetchMembers();
+      if (selectedMemberIds.length === 0) setSelectedMemberIds(members.map((m) => m.user_id));
+      if (Object.keys(customShares).length === 0) {
+        setCustomShares(Object.fromEntries(members.map((m) => [m.user_id, ''])));
+      }
     }
-  }, [tripId, user]);
+  }, [members, user]);
 
   const handleMemberToggle = (id) => {
     if (selectedMemberIds.includes(id)) {
@@ -160,6 +138,7 @@ const AddExpense = () => {
       };
 
       await addExpense(tripId, payload);
+      queryClient.invalidateQueries({ queryKey: ['expenseDashboard', tripId] });
       navigate(`/trips/${tripId}/expenses`);
     } catch (err) {
       const detail = err.response?.data?.detail;
@@ -201,7 +180,11 @@ const AddExpense = () => {
       </div>
 
       <div className="trip-detail-card" style={{ maxWidth: '680px', margin: '0 auto' }}>
-        {apiError && <div className="alert alert-error">{apiError}</div>}
+        {(apiError || (membersError ? 'Failed to load trip members. You must be an active member of this trip.' : '')) && (
+          <div className="alert alert-error">
+            {apiError || 'Failed to load trip members. You must be an active member of this trip.'}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit}>
           {/* Title */}

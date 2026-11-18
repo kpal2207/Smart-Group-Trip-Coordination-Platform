@@ -75,37 +75,7 @@ def add_expense(
     and notifies affected members.
     """
     expense = expense_service.record_expense(db, trip_id, payload, current_user)
-    
-    # Return formatted response
-    users_by_id = {u.id: u for u in db.query(User).all()}
-    payer = users_by_id.get(expense.payer_id)
-    return ExpenseResponse(
-        id=expense.id,
-        trip_id=expense.trip_id,
-        payer_id=expense.payer_id,
-        payer_name=payer.name if payer else "Unknown",
-        title=expense.title,
-        amount=expense.amount,
-        currency=expense.currency,
-        category=expense.category,
-        description=expense.description,
-        status=expense.status.value if hasattr(expense.status, "value") else str(expense.status),
-        created_at=expense.created_at,
-        updated_at=expense.updated_at,
-        splits=[
-            {
-                "id": s.id,
-                "expense_id": s.expense_id,
-                "user_id": s.user_id,
-                "user_name": users_by_id.get(s.user_id).name if users_by_id.get(s.user_id) else "Unknown",
-                "user_email": users_by_id.get(s.user_id).email if users_by_id.get(s.user_id) else "",
-                "share_amount": s.share_amount,
-                "is_accepted": s.is_accepted,
-            }
-            for s in expense.splits
-        ],
-        disputes=[]
-    )
+    return ExpenseResponse.model_validate(expense)
 
 
 # ---------------------------------------------------------------------------
@@ -123,17 +93,7 @@ def raise_dispute(
     Member raises a dispute on an expense split. Notifies the trip host.
     """
     dispute = expense_service.dispute_expense(db, expense_id, payload, current_user)
-    return DisputeResponse(
-        id=dispute.id,
-        expense_id=dispute.expense_id,
-        raised_by_id=dispute.raised_by_id,
-        raised_by_name=current_user.name,
-        reason=dispute.reason,
-        status=dispute.status.value if hasattr(dispute.status, "value") else str(dispute.status),
-        host_notes=dispute.host_notes,
-        created_at=dispute.created_at,
-        resolved_at=dispute.resolved_at,
-    )
+    return DisputeResponse.model_validate(dispute)
 
 
 @router.post("/disputes/{dispute_id}/review", response_model=ExpenseResponse)
@@ -149,48 +109,7 @@ def review_dispute(
     - If modify_split is false: keeps existing split and marks accepted.
     """
     expense = expense_service.review_dispute(db, dispute_id, payload, current_user)
-    users_by_id = {u.id: u for u in db.query(User).all()}
-    payer = users_by_id.get(expense.payer_id)
-    return ExpenseResponse(
-        id=expense.id,
-        trip_id=expense.trip_id,
-        payer_id=expense.payer_id,
-        payer_name=payer.name if payer else "Unknown",
-        title=expense.title,
-        amount=expense.amount,
-        currency=expense.currency,
-        category=expense.category,
-        description=expense.description,
-        status=expense.status.value if hasattr(expense.status, "value") else str(expense.status),
-        created_at=expense.created_at,
-        updated_at=expense.updated_at,
-        splits=[
-            {
-                "id": s.id,
-                "expense_id": s.expense_id,
-                "user_id": s.user_id,
-                "user_name": users_by_id.get(s.user_id).name if users_by_id.get(s.user_id) else "Unknown",
-                "user_email": users_by_id.get(s.user_id).email if users_by_id.get(s.user_id) else "",
-                "share_amount": s.share_amount,
-                "is_accepted": s.is_accepted,
-            }
-            for s in expense.splits
-        ],
-        disputes=[
-            {
-                "id": d.id,
-                "expense_id": d.expense_id,
-                "raised_by_id": d.raised_by_id,
-                "raised_by_name": users_by_id.get(d.raised_by_id).name if users_by_id.get(d.raised_by_id) else "Unknown",
-                "reason": d.reason,
-                "status": d.status.value if hasattr(d.status, "value") else str(d.status),
-                "host_notes": d.host_notes,
-                "created_at": d.created_at,
-                "resolved_at": d.resolved_at,
-            }
-            for d in expense.disputes
-        ]
-    )
+    return ExpenseResponse.model_validate(expense)
 
 
 @router.post("/expenses/{expense_id}/accept", response_model=ExpenseResponse)
@@ -203,35 +122,7 @@ def accept_expense(
     Member reviews expense and confirms agreement (marks expense accepted).
     """
     expense = expense_service.mark_expense_accepted(db, expense_id, current_user)
-    users_by_id = {u.id: u for u in db.query(User).all()}
-    payer = users_by_id.get(expense.payer_id)
-    return ExpenseResponse(
-        id=expense.id,
-        trip_id=expense.trip_id,
-        payer_id=expense.payer_id,
-        payer_name=payer.name if payer else "Unknown",
-        title=expense.title,
-        amount=expense.amount,
-        currency=expense.currency,
-        category=expense.category,
-        description=expense.description,
-        status=expense.status.value if hasattr(expense.status, "value") else str(expense.status),
-        created_at=expense.created_at,
-        updated_at=expense.updated_at,
-        splits=[
-            {
-                "id": s.id,
-                "expense_id": s.expense_id,
-                "user_id": s.user_id,
-                "user_name": users_by_id.get(s.user_id).name if users_by_id.get(s.user_id) else "Unknown",
-                "user_email": users_by_id.get(s.user_id).email if users_by_id.get(s.user_id) else "",
-                "share_amount": s.share_amount,
-                "is_accepted": s.is_accepted,
-            }
-            for s in expense.splits
-        ],
-        disputes=[]
-    )
+    return ExpenseResponse.model_validate(expense)
 
 
 # ---------------------------------------------------------------------------
@@ -254,22 +145,7 @@ def settle_balance(
     settlement, all_cleared, pending_balance = expense_service.record_settlement_payment(
         db, trip_id, payload, current_user
     )
-    users_by_id = {u.id: u for u in db.query(User).all()}
-    payer = users_by_id.get(settlement.payer_id)
-    payee = users_by_id.get(settlement.payee_id)
-
-    return SettlementResponse(
-        id=settlement.id,
-        trip_id=settlement.trip_id,
-        payer_id=settlement.payer_id,
-        payer_name=payer.name if payer else "Unknown",
-        payee_id=settlement.payee_id,
-        payee_name=payee.name if payee else "Unknown",
-        amount=settlement.amount,
-        currency=settlement.currency,
-        notes=settlement.notes,
-        created_at=settlement.created_at,
-    )
+    return SettlementResponse.model_validate(settlement)
 
 
 # ---------------------------------------------------------------------------

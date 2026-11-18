@@ -1,5 +1,7 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useContext } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { RotateCw, ArrowLeft, Plus, Tag, CreditCard, Calendar, CheckCircle2, AlertTriangle, Sparkles } from 'lucide-react';
 import { getTripExpenseDashboard, acceptExpense } from '../api/expense';
 import { AuthContext } from '../context/AuthContext';
 import DisputeModal from '../components/DisputeModal';
@@ -19,10 +21,8 @@ import '../styles/expense.css';
 const ExpenseDashboard = () => {
   const { tripId } = useParams();
   const { user } = useContext(AuthContext);
+  const queryClient = useQueryClient();
 
-  const [dashboard, setDashboard] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState('');
   const [actionSuccessMsg, setActionSuccessMsg] = useState('');
 
   // Modals state
@@ -35,31 +35,17 @@ const ExpenseDashboard = () => {
   const [settlePayeeId, setSettlePayeeId] = useState(null);
   const [settleAmount, setSettleAmount] = useState('');
 
-  const fetchDashboard = async () => {
-    setLoading(true);
-    setErrorMsg('');
-    try {
-      const res = await getTripExpenseDashboard(tripId);
-      setDashboard(res.data);
-    } catch (err) {
-      setErrorMsg(err.response?.data?.detail || 'Failed to load expense dashboard.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { data: dashboard, isLoading, error, refetch, isFetching } = useQuery({
+    queryKey: ['expenseDashboard', tripId],
+    queryFn: () => getTripExpenseDashboard(tripId).then((r) => r.data),
+    enabled: !!tripId,
+  });
 
-  useEffect(() => {
-    if (tripId) {
-      fetchDashboard();
-    }
-  }, [tripId]);
-
-  // Acceptance action
   const handleAcceptExpense = async (expenseId) => {
     try {
       await acceptExpense(expenseId);
       setActionSuccessMsg('Expense accepted.');
-      fetchDashboard();
+      queryClient.invalidateQueries({ queryKey: ['expenseDashboard', tripId] });
       setTimeout(() => setActionSuccessMsg(''), 3000);
     } catch (err) {
       alert(err.response?.data?.detail || 'Failed to accept expense.');
@@ -89,7 +75,9 @@ const ExpenseDashboard = () => {
     setSettleModalOpen(true);
   };
 
-  if (loading) {
+  const errorMsg = error?.response?.data?.detail || error?.message;
+
+  if (isLoading) {
     return (
       <div className="trip-page-container">
         <div className="loading-container" style={{ height: '300px' }}>
@@ -138,10 +126,17 @@ const ExpenseDashboard = () => {
         </div>
 
         <div className="page-header-actions">
-          <button type="button" onClick={fetchDashboard} className="btn btn-secondary btn-sm">
-            ↻ Refresh
+          <button
+            type="button"
+            onClick={() => refetch()}
+            className="btn btn-secondary btn-sm"
+            disabled={isFetching}
+          >
+            <RotateCw size={14} className={isFetching ? 'spin' : ''} style={{ marginRight: '6px' }} />
+            {isFetching ? 'Refreshing...' : 'Refresh'}
           </button>
           <Link to={`/trips/${tripId}`} className="btn btn-secondary btn-sm">
+            <ArrowLeft size={14} style={{ marginRight: '4px' }} />
             Trip Details
           </Link>
           <button
@@ -152,7 +147,8 @@ const ExpenseDashboard = () => {
             Settle Up
           </button>
           <Link to={`/trips/${tripId}/expenses/add`} className="btn btn-primary btn-sm">
-            + Add Expense
+            <Plus size={14} style={{ marginRight: '4px' }} />
+            Add Expense
           </Link>
         </div>
       </div>
@@ -255,9 +251,9 @@ const ExpenseDashboard = () => {
                       <div>
                         <div className="expense-card-title">{exp.title}</div>
                         <div className="expense-card-meta">
-                          <span>🏷 {exp.category}</span>
-                          <span>💳 Paid by <strong>{exp.payer_name}</strong></span>
-                          <span>🗓 {new Date(exp.created_at).toLocaleDateString()}</span>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Tag size={13} /> {exp.category}</span>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}><CreditCard size={13} /> Paid by <strong>{exp.payer_name}</strong></span>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Calendar size={13} /> {new Date(exp.created_at).toLocaleDateString()}</span>
                         </div>
                       </div>
 
@@ -466,7 +462,7 @@ const ExpenseDashboard = () => {
         onClose={() => setDisputeModalOpen(false)}
         onSuccess={() => {
           setActionSuccessMsg('Dispute updated successfully.');
-          fetchDashboard();
+          queryClient.invalidateQueries({ queryKey: ['expenseDashboard', tripId] });
         }}
       />
 
@@ -480,7 +476,7 @@ const ExpenseDashboard = () => {
         onClose={() => setSettleModalOpen(false)}
         onSuccess={() => {
           setActionSuccessMsg('Payment recorded and balances updated.');
-          fetchDashboard();
+          queryClient.invalidateQueries({ queryKey: ['expenseDashboard', tripId] });
         }}
       />
     </div>
