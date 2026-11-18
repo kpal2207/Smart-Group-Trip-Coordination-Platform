@@ -84,66 +84,44 @@ A collaborative trip management platform built for university group projects. Cr
 
 ### Prerequisites
 
-- Python 3.10+
-- Node.js 18+
-- Docker & Docker Compose (for PostgreSQL)
+- Docker and Docker Compose
 
-### 1. Start the Database
+### Start the Full Application
 
 ```bash
+# Copy Docker environment settings (first time)
+cp .env.docker.example .env
+
 docker compose up -d
 ```
 
-This starts PostgreSQL on port 5432 with:
-- Database: `tripmanager`
-- User: `tripuser`
-- Password: `trippass`
+Compose starts PostgreSQL, the FastAPI backend, and the Vite frontend. The backend and frontend source directories are mounted for development hot reload.
 
-### 2. Start the Backend
+Open the frontend at http://localhost:5173, the API at http://localhost:8000, or API docs at http://localhost:8000/docs. PostgreSQL is available on localhost port 5433 by default; change `DATABASE_PUBLISHED_PORT` in `.env` if needed.
+
+### Common Docker Commands
+
+```bash
+# View service logs
+docker compose logs -f
+
+# Stop services (database data is preserved)
+docker compose down
+
+# Stop services and delete database data
+docker compose down -v
+```
+
+### Run Backend Tests
+
+The backend tests can still be run locally with Python:
 
 ```bash
 cd backend
-
-# Create and activate virtual environment (first time)
-python3 -m venv venv
+python -m venv venv
 source venv/bin/activate        # Linux/Mac
 # venv\Scripts\activate          # Windows
-
-# Install dependencies
 pip install -r requirements.txt
-
-# Copy environment file (first time)
-cp .env.example .env
-
-# Start the server
-uvicorn app.main:app --reload
-```
-
-API available at: http://localhost:8000
-API docs (Swagger): http://localhost:8000/docs
-
-### 3. Start the Frontend
-
-```bash
-cd frontend
-
-# Install dependencies (first time)
-npm install
-
-# Copy environment file (first time)
-cp .env.example .env
-
-# Start the dev server
-npm run dev
-```
-
-App available at: http://localhost:5173
-
-### 4. Run Tests
-
-```bash
-cd backend
-source venv/bin/activate
 python -m pytest tests/ -v
 ```
 
@@ -151,24 +129,6 @@ All **46 tests** across 3 modules should pass:
 - `test_auth.py` — 16 tests (registration, login, JWT, logout)
 - `test_trip.py` — 23 tests (creation, joining, listing, validation)
 - `test_expense.py` — 7 tests (expense CRUD, balances, disputes, settlements)
-
----
-
-## Database Commands
-
-```bash
-# Start PostgreSQL
-docker compose up -d
-
-# Stop PostgreSQL (data preserved)
-docker compose down
-
-# Stop and DELETE all data
-docker compose down -v
-
-# View database logs
-docker compose logs -f db
-```
 
 ---
 
@@ -308,13 +268,11 @@ Users table FK:     users.id (INTEGER)
 
 ### Backend (`backend/.env`)
 
-```env
-DATABASE_URL=postgresql://tripuser:trippass@localhost:5432/tripmanager
-SECRET_KEY=change-this-to-a-random-secret-key
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-FRONTEND_URL=http://localhost:5173
-```
+Copy `backend/.env.example` to `backend/.env` and set the database dialect, user, password, host, port, and database name. The backend builds its SQLAlchemy URL from these values, alongside the JWT settings and frontend origin.
+
+### Docker database (`.env.docker`)
+
+Copy `.env.docker.example` to `.env.docker` and set the PostgreSQL credentials used by Docker Compose.
 
 ### Frontend (`frontend/.env`)
 
@@ -322,7 +280,7 @@ FRONTEND_URL=http://localhost:5173
 VITE_API_URL=http://localhost:8000
 ```
 
-> Never commit real `.env` files. Use `.env.example` as a reference.
+> Never commit real `.env` files. The example files contain development-only values.
 
 ---
 
