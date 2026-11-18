@@ -1,0 +1,139 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mxfile host="app.diagrams.net" agent="Antigravity" version="21.0.0" type="device"><diagram id="convoysync-sequence" name="4. UML Sequence Diagram">
+    <mxGraphModel dx="1422" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="seq_0" />
+        <mxCell id="seq_1" parent="seq_0" />
+
+        <mxCell id="seq_title" value="ConvoySync — UML Sequence Diagram (GPS Telemetry Ingestion &amp; Polling)" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=20;fontStyle=1;fontColor=#1E293B;" vertex="1" parent="seq_1">
+          <mxGeometry x="350" y="20" width="900" height="40" as="geometry" />
+        </mxCell>
+
+        
+        <mxCell id="ll_client" value="Traveler Vehicle&#10;(React Client)" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;collapsible=0;recursiveResize=0;outlineConnect=0;fillColor=#E0E7FF;strokeColor=#4338CA;fontStyle=1;" vertex="1" parent="seq_1">
+          <mxGeometry x="120" y="80" width="130" height="600" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ll_api" value="FastAPI Backend&#10;(Router / Auth)" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;collapsible=0;recursiveResize=0;outlineConnect=0;fillColor=#DCFCE7;strokeColor=#15803D;fontStyle=1;" vertex="1" parent="seq_1">
+          <mxGeometry x="420" y="80" width="130" height="600" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ll_gis" value="GIS Engine&#10;(Haversine / Lag)" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;collapsible=0;recursiveResize=0;outlineConnect=0;fillColor=#FEF3C7;strokeColor=#B45309;fontStyle=1;" vertex="1" parent="seq_1">
+          <mxGeometry x="720" y="80" width="130" height="600" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ll_db" value="PostgreSQL DB&#10;(Neon Cloud)" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;collapsible=0;recursiveResize=0;outlineConnect=0;fillColor=#CCFBF1;strokeColor=#0F766E;fontStyle=1;" vertex="1" parent="seq_1">
+          <mxGeometry x="1020" y="80" width="130" height="600" as="geometry" />
+        </mxCell>
+
+        
+        
+        <mxCell id="msg_1" value="1: POST /trips/{id}/telemetry (lat, lon, speed, ghost_mode)" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;strokeColor=#1E293B;" edge="1" parent="seq_1">
+          <mxGeometry x="0.05" y="10" relative="1" as="geometry">
+            <mxPoint x="185" y="160" as="sourcePoint" />
+            <mxPoint x="485" y="160" as="targetPoint" />
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        
+        <mxCell id="msg_2" value="2: Check membership (trip_id, user_id)" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;strokeColor=#1E293B;" edge="1" parent="seq_1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="485" y="190" as="sourcePoint" />
+            <mxPoint x="1085" y="190" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        
+        <mxCell id="msg_3" value="3: Member verified (active role)" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;endSize=8;rounded=0;strokeColor=#1E293B;" edge="1" parent="seq_1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1085" y="220" as="sourcePoint" />
+            <mxPoint x="485" y="220" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        
+        <mxCell id="msg_4" value="4: INSERT INTO convoy_telemetry" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;strokeColor=#0F766E;" edge="1" parent="seq_1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="485" y="250" as="sourcePoint" />
+            <mxPoint x="1085" y="250" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        
+        <mxCell id="msg_5" value="5: 201 Created (ping logged)" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;endSize=8;rounded=0;strokeColor=#15803D;" edge="1" parent="seq_1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="485" y="280" as="sourcePoint" />
+            <mxPoint x="185" y="280" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        
+        <mxCell id="box_poll" value="CONVOY MAP POLLING (Every 5s - 30s)" style="shape=umlFrame;whiteSpace=wrap;html=1;width=240;height=25;fillColor=none;strokeColor=#64748B;fontStyle=1;" vertex="1" parent="seq_1">
+          <mxGeometry x="100" y="320" width="1070" height="280" as="geometry" />
+        </mxCell>
+
+        
+        <mxCell id="msg_6" value="6: GET /trips/{id}/convoy/locations" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;strokeColor=#1E293B;" edge="1" parent="seq_1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="185" y="360" as="sourcePoint" />
+            <mxPoint x="485" y="360" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        
+        <mxCell id="msg_7" value="7: Index Scan DISTINCT ON (user_id) ORDER BY recorded_at DESC" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;strokeColor=#0F766E;" edge="1" parent="seq_1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="485" y="390" as="sourcePoint" />
+            <mxPoint x="1085" y="390" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        
+        <mxCell id="msg_8" value="8: Return latest coordinates &amp; ghost flags" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;endSize=8;rounded=0;strokeColor=#0F766E;" edge="1" parent="seq_1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1085" y="420" as="sourcePoint" />
+            <mxPoint x="485" y="420" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        
+        <mxCell id="msg_9" value="9: Compute Convoy Median &amp; Lag (Haversine)" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;strokeColor=#B45309;" edge="1" parent="seq_1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="485" y="450" as="sourcePoint" />
+            <mxPoint x="785" y="450" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        
+        <mxCell id="msg_10" value="10: Lag evaluated (&gt;2.0 km triggers warning flag)" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;endSize=8;rounded=0;strokeColor=#B45309;" edge="1" parent="seq_1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="785" y="480" as="sourcePoint" />
+            <mxPoint x="485" y="480" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        
+        <mxCell id="msg_11" value="11: Filter coordinates: Mask to NULL if is_ghost_mode == True" style="html=1;verticalAlign=bottom;endArrow=none;rounded=0;strokeColor=#DC2626;" edge="1" parent="seq_1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="485" y="510" as="sourcePoint" />
+            <mxPoint x="520" y="525" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        
+        <mxCell id="msg_12" value="12: 200 OK (members list, fresh/stale markers, lag alerts)" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;endSize=8;rounded=0;strokeColor=#15803D;" edge="1" parent="seq_1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="485" y="560" as="sourcePoint" />
+            <mxPoint x="185" y="560" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  
+  
+  
+  </mxfile>
