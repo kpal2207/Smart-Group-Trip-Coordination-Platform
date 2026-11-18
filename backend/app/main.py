@@ -8,33 +8,10 @@ Run with: uvicorn app.main:app --reload
 Docs at:  http://localhost:8000/docs
 """
 
-from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.routers import auth, trip, expense
-import app.models  # noqa: F401 - ensures all models registered for Base.metadata
-
-
-# ---------------------------------------------------------------------------
-# Lifespan: runs on startup / shutdown
-# ---------------------------------------------------------------------------
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """
-    Create database tables on startup (development convenience).
-    In production, use Alembic migrations instead.
-    
-    If the database is unavailable (e.g., during tests with SQLite override),
-    we skip table creation here — tests handle their own setup.
-    """
-    try:
-        from app.database import Base, engine
-        Base.metadata.create_all(bind=engine)
-    except Exception:
-        # Database not available (tests use their own engine)
-        pass
-    yield
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +22,6 @@ app = FastAPI(
     description="Backend API for the Trip Management System. "
                 "Handles authentication, trips, and expenses.",
     version="1.0.0",
-    lifespan=lifespan,
 )
 
 # ---------------------------------------------------------------------------
