@@ -1,5 +1,6 @@
 import React, { useState, useContext } from 'react';
 import { Link, useNavigate, Navigate } from 'react-router-dom';
+import { User, Mail, Lock, Eye, EyeOff, UserPlus } from 'lucide-react';
 import { AuthContext } from '../context/AuthContext';
 import AuthLeftPanel from '../components/AuthLeftPanel';
 import '../styles/auth.css';
@@ -76,7 +77,7 @@ const Signup = () => {
 
     setIsSubmitting(true);
     try {
-      const res = await signup(formData.name, formData.email, formData.password, formData.password_confirm);
+      const res = await signup(formData.name, formData.email, formData.password);
       if (res?.user && (!res?.session || res?.user?.identities?.length === 0)) {
         setSuccess('Registration successful! Please check your email inbox to verify your account before logging in.');
       } else {
@@ -152,10 +153,7 @@ const Signup = () => {
               <label htmlFor="signupName">Full Name</label>
               <div className="input-icon-wrapper">
                 <span className="input-leading-icon">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                    <circle cx="12" cy="7" r="4" />
-                  </svg>
+                  <User size={18} />
                 </span>
                 <input
                   id="signupName"
@@ -176,10 +174,7 @@ const Signup = () => {
               <label htmlFor="signupEmail">Email Address</label>
               <div className="input-icon-wrapper">
                 <span className="input-leading-icon">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="2" y="4" width="20" height="16" rx="2" />
-                    <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
-                  </svg>
+                  <Mail size={18} />
                 </span>
                 <input
                   id="signupEmail"
@@ -200,10 +195,7 @@ const Signup = () => {
               <label htmlFor="signupPassword">Password</label>
               <div className="input-icon-wrapper">
                 <span className="input-leading-icon">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                  </svg>
+                  <Lock size={18} />
                 </span>
                 <input
                   id="signupPassword"
@@ -221,17 +213,7 @@ const Signup = () => {
                   className="input-trailing-btn"
                   title={showPassword ? 'Hide password' : 'Show password'}
                 >
-                  {showPassword ? (
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
-                      <line x1="1" y1="1" x2="23" y2="23" />
-                    </svg>
-                  ) : (
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                      <circle cx="12" cy="12" r="3" />
-                    </svg>
-                  )}
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
               {errors.password && <span style={{ color: '#dc2626', fontSize: '0.8rem', marginTop: '4px', display: 'block' }}>{errors.password}</span>}
@@ -242,10 +224,7 @@ const Signup = () => {
               <label htmlFor="signupPasswordConfirm">Confirm Password</label>
               <div className="input-icon-wrapper">
                 <span className="input-leading-icon">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                  </svg>
+                  <Lock size={18} />
                 </span>
                 <input
                   id="signupPasswordConfirm"
@@ -271,12 +250,7 @@ const Signup = () => {
                 'Creating Account...'
               ) : (
                 <>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                    <circle cx="8.5" cy="7" r="4" />
-                    <line x1="20" y1="8" x2="20" y2="14" />
-                    <line x1="23" y1="11" x2="17" y2="11" />
-                  </svg>
+                  <UserPlus size={18} style={{ marginRight: '6px' }} />
                   Create Account
                 </>
               )}

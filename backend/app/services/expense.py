@@ -605,88 +605,13 @@ def get_trip_ledger_dashboard(db: Session, trip_id: int, current_user: User) -> 
 
     member_balances, who_owes_whom, pending_debt, all_cleared = calculate_balances_and_simplify_debt(db, trip_id)
 
-    # Fetch expenses with relationships
+    # Fetch expenses and settlements serialized via Pydantic model_validate
     expenses = db.query(Expense).filter(Expense.trip_id == trip_id).order_by(Expense.created_at.desc()).all()
-    expense_responses = []
-    total_trip_expenses = Decimal("0.00")
+    total_trip_expenses = sum((exp.amount for exp in expenses), Decimal("0.00"))
+    expense_responses = [ExpenseResponse.model_validate(exp) for exp in expenses]
 
-    users_by_id = {u.id: u for u in db.query(User).all()}
-
-    for exp in expenses:
-        total_trip_expenses += exp.amount
-        payer = users_by_id.get(exp.payer_id)
-
-        splits_resp = []
-        for s in exp.splits:
-            su = users_by_id.get(s.user_id)
-            splits_resp.append(
-                ExpenseSplitResponse(
-                    id=s.id,
-                    expense_id=s.expense_id,
-                    user_id=s.user_id,
-                    user_name=su.name if su else "Unknown",
-                    user_email=su.email if su else "",
-                    share_amount=s.share_amount,
-                    is_accepted=s.is_accepted,
-                )
-            )
-
-        disputes_resp = []
-        for d in exp.disputes:
-            du = users_by_id.get(d.raised_by_id)
-            disputes_resp.append(
-                DisputeResponse(
-                    id=d.id,
-                    expense_id=d.expense_id,
-                    raised_by_id=d.raised_by_id,
-                    raised_by_name=du.name if du else "Unknown",
-                    reason=d.reason,
-                    status=d.status.value if hasattr(d.status, "value") else str(d.status),
-                    host_notes=d.host_notes,
-                    created_at=d.created_at,
-                    resolved_at=d.resolved_at,
-                )
-            )
-
-        expense_responses.append(
-            ExpenseResponse(
-                id=exp.id,
-                trip_id=exp.trip_id,
-                payer_id=exp.payer_id,
-                payer_name=payer.name if payer else "Unknown",
-                title=exp.title,
-                amount=exp.amount,
-                currency=exp.currency,
-                category=exp.category,
-                description=exp.description,
-                status=exp.status.value if hasattr(exp.status, "value") else str(exp.status),
-                created_at=exp.created_at,
-                updated_at=exp.updated_at,
-                splits=splits_resp,
-                disputes=disputes_resp,
-            )
-        )
-
-    # Fetch settlements
     settlements = db.query(Settlement).filter(Settlement.trip_id == trip_id).order_by(Settlement.created_at.desc()).all()
-    settlement_responses = []
-    for st in settlements:
-        payer = users_by_id.get(st.payer_id)
-        payee = users_by_id.get(st.payee_id)
-        settlement_responses.append(
-            SettlementResponse(
-                id=st.id,
-                trip_id=st.trip_id,
-                payer_id=st.payer_id,
-                payer_name=payer.name if payer else "Unknown",
-                payee_id=st.payee_id,
-                payee_name=payee.name if payee else "Unknown",
-                amount=st.amount,
-                currency=st.currency,
-                notes=st.notes,
-                created_at=st.created_at,
-            )
-        )
+    settlement_responses = [SettlementResponse.model_validate(st) for st in settlements]
 
     members_list = get_trip_members_list(db, trip_id)
 

@@ -1,5 +1,5 @@
 import React, { createContext, useState, useEffect } from 'react';
-import { getMe, loginUser, registerUser, logoutUser as apiLogoutUser } from '../api/auth';
+import { getMe } from '../api/auth';
 import { supabase } from '../utils/supabase';
 
 export const AuthContext = createContext();
@@ -37,15 +37,9 @@ export const AuthProvider = ({ children }) => {
             const { data: { session } } = await supabase.auth.getSession();
             if (session?.access_token) {
               await syncBackendUser(session.access_token);
-            } else {
-              // Check existing localStorage token as fallback
-              const localToken = localStorage.getItem('access_token');
-              if (localToken) {
-                await syncBackendUser(localToken);
-              }
             }
           } catch (e) {
-            console.warn('Supabase session check error, falling back to local token', e);
+            console.warn('Supabase session check failed', e);
           }
 
           // Listen for OAuth redirects, email confirmation logins, and token refreshes
@@ -59,10 +53,7 @@ export const AuthProvider = ({ children }) => {
           });
           subscription = data?.subscription;
         } else {
-          const localToken = localStorage.getItem('access_token');
-          if (localToken) {
-            await syncBackendUser(localToken);
-          }
+          console.error('Supabase Auth is not configured.');
         }
       } catch (err) {
         console.error('Auth initialization error:', err);
@@ -82,40 +73,27 @@ export const AuthProvider = ({ children }) => {
 
   // Standard Email + Password Login
   const login = async (email, password) => {
-    if (supabase && supabase.auth && import.meta.env.VITE_SUPABASE_URL) {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) throw error;
-      if (data?.session?.access_token) {
-        await syncBackendUser(data.session.access_token);
-      }
-      return data;
-    } else {
-      const res = await loginUser({ email, password });
-      localStorage.setItem('access_token', res.data.access_token);
-      setUser(res.data.user);
-      return res.data;
-    }
+    if (!supabase?.auth) throw new Error('Supabase Auth is not configured.');
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    if (data?.session?.access_token) await syncBackendUser(data.session.access_token);
+    return data;
   };
 
   // Sign up with Email + Password (Supabase sends verification email if enabled)
-  const signup = async (name, email, password, password_confirm) => {
-    if (supabase && supabase.auth && import.meta.env.VITE_SUPABASE_URL) {
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: { name: name.trim() },
-          emailRedirectTo: `${window.location.origin}/login`,
-        },
-      });
-      if (error) throw error;
-      if (data?.session?.access_token) {
-        await syncBackendUser(data.session.access_token);
-      }
-      return data;
-    } else {
-      return await registerUser({ name, email, password, password_confirm });
-    }
+  const signup = async (name, email, password) => {
+    if (!supabase?.auth) throw new Error('Supabase Auth is not configured.');
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { name: name.trim() },
+        emailRedirectTo: `${window.location.origin}/login`,
+      },
+    });
+    if (error) throw error;
+    if (data?.session?.access_token) await syncBackendUser(data.session.access_token);
+    return data;
   };
 
   // 1-Click Sign in with Google
@@ -158,15 +136,11 @@ export const AuthProvider = ({ children }) => {
   // Logout
   const logout = async () => {
     try {
-      if (supabase && supabase.auth) {
-        await supabase.auth.signOut();
-      }
-      await apiLogoutUser();
-    } catch {
-      // Continue cleanup even if server is unreachable
+      if (supabase?.auth) await supabase.auth.signOut();
+    } finally {
+      localStorage.removeItem('access_token');
+      setUser(null);
     }
-    localStorage.removeItem('access_token');
-    setUser(null);
   };
 
   return (

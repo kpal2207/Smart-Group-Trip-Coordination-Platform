@@ -1,31 +1,7 @@
-# Start the full development stack with: docker compose up -d
+# Start the development stack with: docker compose up -d
+# Connects to Supabase Cloud PostgreSQL and Supabase Auth
 
 services:
-  db:
-    image: postgres:16-alpine
-    container_name: tripmanager-db
-    restart: unless-stopped
-    env_file:
-      - .env.docker
-    ports:
-      - "5433:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "pg_isready",
-          "-U",
-          "$$POSTGRES_USER",
-          "-d",
-          "$$POSTGRES_DB",
-        ]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 5s
-
   backend:
     build:
       context: .
@@ -40,9 +16,6 @@ services:
       - ./backend:/app
     command:
       ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
-    depends_on:
-      db:
-        condition: service_healthy
     healthcheck:
       test:
         [
@@ -73,6 +46,3 @@ services:
     depends_on:
       backend:
         condition: service_healthy
-
-volumes:
-  pgdata:
