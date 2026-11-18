@@ -1,33 +1,78 @@
-# Docker Compose — PostgreSQL for Development
-# ==============================================
-# This provides a consistent PostgreSQL database for all team members.
-#
-# Usage:
-#   Start:  docker compose up -d
-#   Stop:   docker compose down
-#   Reset:  docker compose down -v   (WARNING: deletes all data)
-#   Logs:   docker compose logs -f db
-#
-# The database will be accessible at:
-#   Host:     localhost
-#   Port:     5432
-#   Database: tripmanager
-#   User:     tripuser
-#   Password: trippass   (development only — never use in production)
+# Start the full development stack with: docker compose up -d
 
 services:
   db:
     image: postgres:16-alpine
     container_name: tripmanager-db
     restart: unless-stopped
-    environment:
-      POSTGRES_DB: tripmanager
-      POSTGRES_USER: tripuser
-      POSTGRES_PASSWORD: trippass
+    env_file:
+      - .env.docker
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "pg_isready",
+          "-U",
+          "$$POSTGRES_USER",
+          "-d",
+          "$$POSTGRES_DB",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: tripmanager-backend
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    command:
+      ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/').read()",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: tripmanager-frontend
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+    depends_on:
+      backend:
+        condition: service_healthy
 
 volumes:
   pgdata:
