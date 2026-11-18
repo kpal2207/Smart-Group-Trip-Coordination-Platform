@@ -1,42 +1,17 @@
-"""
-Trip Management System — FastAPI Application Entry Point.
-
-This is the main application file that configures the FastAPI app,
-sets up CORS, and includes all API routers.
-
-Run with: uvicorn app.main:app --reload
-Docs at:  http://localhost:8000/docs
-"""
-
-from contextlib import asynccontextmanager
+"""FastAPI entry point for the Trip Management System."""
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+import app.models  # Register all SQLAlchemy models.
 from app.config import settings
 from app.routers import auth, expense, telemetry, trip
-import app.models  # noqa: F401 - ensures all models registered for Base.metadata
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Create tables for development; production uses Alembic migrations."""
-    try:
-        from app.database import Base, engine
-        Base.metadata.create_all(bind=engine)
-    except Exception:
-        # Database may be unavailable during tests or local startup.
-        pass
-    yield
 
 
 app = FastAPI(
     title="Trip Management System API",
-    description=(
-        "Backend API for trips, expenses, and authenticated convoy telemetry."
-    ),
+    description="Backend API for trips, expenses, and authenticated convoy telemetry.",
     version="1.1.0",
-    lifespan=lifespan,
 )
 
 app.add_middleware(
