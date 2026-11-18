@@ -9,16 +9,17 @@ class Settings(BaseSettings):
     Using pydantic-settings for validation and type safety.
     """
 
-    DATABASE_DIALECT: str
+    DATABASE_DIALECT: str = "postgresql"
     DATABASE_USER: str
     DATABASE_PASSWORD: str
     DATABASE_HOST: str
-    DATABASE_PORT: int
-    DATABASE_NAME: str
-    SECRET_KEY: str
-    ALGORITHM: str
-    ACCESS_TOKEN_EXPIRE_MINUTES: int
-    FRONTEND_URL: str
+    DATABASE_PORT: int = 5432
+    DATABASE_NAME: str = "postgres"
+    SUPABASE_URL: str = ""
+    SECRET_KEY: str = "local-development-fallback-secret"
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    FRONTEND_URL: str = "http://localhost:5173"
 
     model_config = SettingsConfigDict(
         env_file=Path(__file__).resolve().parent.parent / ".env",

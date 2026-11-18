@@ -5,6 +5,7 @@ import Navbar from './components/Navbar';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
+import ResetPassword from './pages/ResetPassword';
 import Home from './pages/Home';
 import ProtectedRoute from './components/ProtectedRoute';
 import MyTrips from './pages/MyTrips';
@@ -25,6 +26,7 @@ const App = () => {
           <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
 
           {/* Protected Routes (include Navbar here or via a layout component) */}
           <Route element={<ProtectedRoute />}>
