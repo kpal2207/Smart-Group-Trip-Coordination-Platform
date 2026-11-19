@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { createTrip } from '../api/trip';
 
 const CreateTrip = () => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const [formData, setFormData] = useState({
     title: '',
@@ -79,6 +81,7 @@ const CreateTrip = () => {
 
       const res = await createTrip(payload);
       setCreatedTrip(res.data);
+      queryClient.invalidateQueries({ queryKey: ['myTrips'] });
     } catch (err) {
       const detail = err.response?.data?.detail;
       if (typeof detail === 'string') {

@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { joinTripByCode } from '../api/trip';
 
 const JoinTrip = () => {
   const { tripCode: urlTripCode } = useParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const [tripCode, setTripCode] = useState(urlTripCode || '');
   const [errorMsg, setErrorMsg] = useState('');
@@ -38,6 +40,7 @@ const JoinTrip = () => {
     try {
       const res = await joinTripByCode(cleanCode);
       const joinedTrip = res.data.trip;
+      queryClient.invalidateQueries({ queryKey: ['myTrips'] });
       setSuccessMsg(`Successfully joined "${joinedTrip.title}"! Redirecting to trip details...`);
       setTimeout(() => {
         navigate(`/trips/${joinedTrip.id}`);

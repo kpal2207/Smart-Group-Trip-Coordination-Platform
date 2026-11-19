@@ -1,60 +1,162 @@
 import React, { createContext, useState, useEffect } from 'react';
-import { getMe, loginUser, registerUser, logoutUser as apiLogoutUser } from '../api/auth';
+import { getMe } from '../api/auth';
+import { supabase } from '../utils/supabase';
 
 export const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true); // For initial auth check
+  const [loading, setLoading] = useState(true);
+
+  // Helper to sync Supabase token with local FastAPI backend
+  const syncBackendUser = async (token) => {
+    if (!token) {
+      setUser(null);
+      localStorage.removeItem('access_token');
+      return null;
+    }
+    localStorage.setItem('access_token', token);
+    try {
+      const res = await getMe();
+      setUser(res.data);
+      return res.data;
+    } catch (err) {
+      console.error('Failed to sync backend user profile:', err);
+      return null;
+    }
+  };
 
   useEffect(() => {
-    // On mount, check if user has access token in localStorage
-    // NOTE: Using localStorage for token storage is simple for Sprint 1.
-    // In a production environment, HTTP-only secure cookies are preferable to mitigate XSS attacks.
+    let subscription = null;
+
     const initializeAuth = async () => {
-      const token = localStorage.getItem('access_token');
-      if (token) {
-        try {
-          const res = await getMe();
-          setUser(res.data);
-        } catch (error) {
-          console.error("Token invalid or expired", error);
-          localStorage.removeItem('access_token');
-          setUser(null);
+      try {
+        // 1. Try Supabase active session first
+        if (supabase && supabase.auth) {
+          try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.access_token) {
+              await syncBackendUser(session.access_token);
+            }
+          } catch (e) {
+            console.warn('Supabase session check failed', e);
+          }
+
+          // Listen for OAuth redirects, email confirmation logins, and token refreshes
+          const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
+            if (session?.access_token) {
+              await syncBackendUser(session.access_token);
+            } else if (event === 'SIGNED_OUT') {
+              setUser(null);
+              localStorage.removeItem('access_token');
+            }
+          });
+          subscription = data?.subscription;
+        } else {
+          console.error('Supabase Auth is not configured.');
         }
+      } catch (err) {
+        console.error('Auth initialization error:', err);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
 
     initializeAuth();
+
+    return () => {
+      if (subscription) {
+        subscription.unsubscribe();
+      }
+    };
   }, []);
 
+  // Standard Email + Password Login
   const login = async (email, password) => {
-    const res = await loginUser({ email, password });
-    // Assuming backend returns { access_token, user, token_type }
-    localStorage.setItem('access_token', res.data.access_token);
-    setUser(res.data.user);
+    if (!supabase?.auth) throw new Error('Supabase Auth is not configured.');
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    if (data?.session?.access_token) await syncBackendUser(data.session.access_token);
+    return data;
   };
 
-  const signup = async (name, email, password, password_confirm) => {
-    // Signup does not automatically login the user
-    await registerUser({ name, email, password, password_confirm });
+  // Sign up with Email + Password (Supabase sends verification email if enabled)
+  const signup = async (name, email, password) => {
+    if (!supabase?.auth) throw new Error('Supabase Auth is not configured.');
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { name: name.trim() },
+        emailRedirectTo: `${window.location.origin}/login`,
+      },
+    });
+    if (error) throw error;
+    if (data?.session?.access_token) await syncBackendUser(data.session.access_token);
+    return data;
   };
 
-  const logout = async () => {
-    // Since JWT is stateless on the server, removing it from the client effectively logs the user out locally.
-    // We still call the API in case we have server-side invalidation/tracking.
-    try {
-      await apiLogoutUser();
-    } catch (e) {
-      console.error("Logout API failed, continuing client-side logout");
+  // 1-Click Sign in with Google
+  const loginWithGoogle = async () => {
+    if (!supabase || !supabase.auth) {
+      throw new Error('Supabase client not initialized');
     }
-    localStorage.removeItem('access_token');
-    setUser(null);
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${window.location.origin}/login`,
+      },
+    });
+    if (error) throw error;
+    return data;
+  };
+
+  // Send Password Reset Email
+  const forgotPassword = async (email) => {
+    if (!supabase || !supabase.auth) {
+      throw new Error('Supabase client not initialized');
+    }
+    const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    if (error) throw error;
+    return data;
+  };
+
+  // Update Password (used after user clicks reset link in email)
+  const updatePassword = async (newPassword) => {
+    if (!supabase || !supabase.auth) {
+      throw new Error('Supabase client not initialized');
+    }
+    const { data, error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) throw error;
+    return data;
+  };
+
+  // Logout
+  const logout = async () => {
+    try {
+      if (supabase?.auth) await supabase.auth.signOut();
+    } finally {
+      localStorage.removeItem('access_token');
+      setUser(null);
+    }
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout, isAuthenticated: user !== null }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        login,
+        signup,
+        loginWithGoogle,
+        forgotPassword,
+        updatePassword,
+        logout,
+        isAuthenticated: user !== null,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

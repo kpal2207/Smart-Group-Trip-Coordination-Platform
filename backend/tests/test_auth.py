@@ -47,43 +47,18 @@ def test_register_invalid_email(client):
     )
     assert response.status_code == 422
 
-def test_register_weak_password(client):
-    """Test registration fails with weak password."""
-    # Too short
+def test_register_delegates_password_format_to_supabase(client):
+    """Test registration accepts password format as complexity is enforced by Supabase Auth."""
     response = client.post(
         "/auth/register",
         json={
             "name": "User",
-            "email": "user1@example.com",
-            "password": "Wk1",
-            "password_confirm": "Wk1"
+            "email": "user_format@example.com",
+            "password": "simplepassword",
+            "password_confirm": "simplepassword"
         }
     )
-    assert response.status_code == 422
-    
-    # No uppercase
-    response = client.post(
-        "/auth/register",
-        json={
-            "name": "User",
-            "email": "user2@example.com",
-            "password": "password123!",
-            "password_confirm": "password123!"
-        }
-    )
-    assert response.status_code == 422
-    
-    # No digit
-    response = client.post(
-        "/auth/register",
-        json={
-            "name": "User",
-            "email": "user3@example.com",
-            "password": "Password!",
-            "password_confirm": "Password!"
-        }
-    )
-    assert response.status_code == 422
+    assert response.status_code == 201
 
 def test_register_password_mismatch(client):
     """Test registration fails when passwords do not match."""
