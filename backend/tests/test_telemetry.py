@@ -122,3 +122,20 @@ def test_telemetry_requires_authentication(client):
         "/trips/1/telemetry", json=VALID_PING
     )
     assert response.status_code == 401
+
+def test_recent_ping_appears_as_fresh_in_convoy_locations(
+    client, auth_header, test_user
+):
+    trip_id = _trip_id(client, auth_header)
+    submitted = client.post(
+        f"/trips/{trip_id}/telemetry", json=VALID_PING, headers=auth_header
+    )
+    assert submitted.status_code == 201, submitted.text
+
+    response = client.get(f"/trips/{trip_id}/convoy/locations", headers=auth_header)
+    assert response.status_code == 200, response.text
+
+    member = next(item for item in response.json() if item["user_id"] == test_user.id)
+    assert member["location_status"] == "fresh"
+    assert member["latitude"] == pytest.approx(VALID_PING["latitude"])
+    assert member["longitude"] == pytest.approx(VALID_PING["longitude"])
