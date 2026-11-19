@@ -1,6 +1,6 @@
 """Seed script for Sprint 2 pair demo: "Location data for one trip".
 
-Seeds four members in PostgreSQL, creates one trip with four memberships,
+Seeds four members in PostgreSQL (or SQLite), creates one trip with four memberships,
 and inserts convoy telemetry pings — including one Ghost Mode member whose
 coordinates must appear as null in the convoy polling response.
 
@@ -9,8 +9,9 @@ upsert-like logic by checking for existing email addresses).
 
 Usage:
     cd backend
-    python -m scripts.seed_convoy_data          # uses DATABASE_URL from .env
-    python -m scripts.seed_convoy_data --reset   # drop & re-seed
+    python -m scripts.seed_convoy_data                      # uses DATABASE_URL from .env
+    python -m scripts.seed_convoy_data --db-url sqlite:///./dev.db  # seed local SQLite DB
+    python -m scripts.seed_convoy_data --reset             # drop & re-seed
 """
 
 from __future__ import annotations
@@ -28,8 +29,10 @@ _backend_dir = Path(__file__).resolve().parent.parent
 if str(_backend_dir) not in sys.path:
     sys.path.insert(0, str(_backend_dir))
 
-from sqlalchemy import text
-from app.database import engine, SessionLocal
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
+from app.config import settings
+from app.database import Base
 from app.models import User, Trip, TripMember, MemberRole, ConvoyTelemetry
 
 
@@ -100,9 +103,21 @@ def _ensure_membership(db, trip_id: int, user_id: int, role: MemberRole) -> Trip
     return member
 
 
-def seed(reset: bool = False) -> None:
+def seed(db_url: str | None = None, reset: bool = False) -> None:
     """Run the full seed procedure."""
-    db = SessionLocal()
+    target_url = db_url or settings.DATABASE_URL
+    connect_args = {"check_same_thread": False} if target_url.startswith("sqlite") else {}
+    target_engine = create_engine(target_url, connect_args=connect_args)
+
+    # If targeting SQLite, ensure tables exist
+    if target_url.startswith("sqlite"):
+        from app.db_bootstrap import bootstrap_users
+        bootstrap_users(target_engine)
+        Base.metadata.create_all(bind=target_engine)
+
+    Session = sessionmaker(autocommit=False, autoflush=False, bind=target_engine)
+    db = Session()
+
     try:
         if reset:
             print("🗑️  Resetting seed data...")
@@ -176,6 +191,7 @@ def seed(reset: bool = False) -> None:
         print("\n" + "=" * 60)
         print("SEED VERIFICATION SUMMARY")
         print("=" * 60)
+        print(f"  Target DB:    {target_url}")
         print(f"  Trip:         '{trip.title}' (code: {trip.trip_code})")
         print(f"  Members:      {member_count} (expected: 4)")
         print(f"  Pings:        {ping_count} (expected: {len(SEED_PINGS)})")
@@ -200,6 +216,12 @@ def main() -> int:
         description="Seed Sprint 2 demo data: 4 members, 1 trip, telemetry pings."
     )
     parser.add_argument(
+        "--db-url",
+        type=str,
+        default=None,
+        help="Optional database connection URL (overrides DATABASE_URL in .env).",
+    )
+    parser.add_argument(
         "--reset",
         action="store_true",
         help="Delete existing seed data before re-seeding.",
@@ -207,7 +229,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        seed(reset=args.reset)
+        seed(db_url=args.db_url, reset=args.reset)
         return 0
     except Exception as e:
         print(f"\n❌ Seed failed: {e}", file=sys.stderr)

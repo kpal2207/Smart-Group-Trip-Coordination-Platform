@@ -43,6 +43,12 @@ def main() -> int:
 
     eng = create_engine(db_url)
 
+    # ── Step 0: Bootstrap users table (ConvoySync DB architecture) ─
+    print("\n👤 STEP 0: Bootstrap users table via db_bootstrap")
+    from app.db_bootstrap import bootstrap_users
+    bootstrap_users(eng)
+    print("   ✅ Users table bootstrapped successfully")
+
     # ── Step 1: Upgrade to head ───────────────────────────────────
     print("\n📦 STEP 1: alembic upgrade head")
     command.upgrade(cfg, "head")
