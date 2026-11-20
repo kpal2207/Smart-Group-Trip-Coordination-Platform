@@ -1,5 +1,7 @@
 """Focused API tests for telemetry validation, authorization, and privacy."""
 import pytest
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 VALID_PING = {
     "latitude": 37.7749,
@@ -15,7 +17,6 @@ VALID_TRIP = {
     "start_date": "2026-12-01",
     "end_date": "2026-12-05",
 }
-
 
 def _trip_id(client, auth_header):
     response = client.post("/trips/", json=VALID_TRIP, headers=auth_header)
@@ -122,3 +123,44 @@ def test_telemetry_requires_authentication(client):
         "/trips/1/telemetry", json=VALID_PING
     )
     assert response.status_code == 401
+
+def test_recent_ping_appears_as_fresh_in_convoy_locations(
+    client, auth_header, test_user
+):
+    trip_id = _trip_id(client, auth_header)
+    submitted = client.post(
+        f"/trips/{trip_id}/telemetry", json=VALID_PING, headers=auth_header
+    )
+    assert submitted.status_code == 201, submitted.text
+
+    response = client.get(f"/trips/{trip_id}/convoy/locations", headers=auth_header)
+    assert response.status_code == 200, response.text
+
+    member = next(item for item in response.json() if item["user_id"] == test_user.id)
+    assert member["location_status"] == "fresh"
+    assert member["latitude"] == pytest.approx(VALID_PING["latitude"])
+    assert member["longitude"] == pytest.approx(VALID_PING["longitude"])
+
+def test_two_minute_old_ping_is_stale_with_visible_coordinates(
+    client, auth_header, test_user
+):
+    trip_id = _trip_id(client, auth_header)
+    ping_time = datetime(2026, 12, 1, 12, 0, tzinfo=timezone.utc)
+
+    with patch("app.routers.telemetry.datetime") as clock:
+        clock.now.return_value = ping_time
+        submitted = client.post(
+            f"/trips/{trip_id}/telemetry", json=VALID_PING, headers=auth_header
+        )
+        assert submitted.status_code == 201, submitted.text
+
+        clock.now.return_value = ping_time + timedelta(seconds=120)
+        response = client.get(
+            f"/trips/{trip_id}/convoy/locations", headers=auth_header
+        )
+
+    assert response.status_code == 200, response.text
+    member = next(item for item in response.json() if item["user_id"] == test_user.id)
+    assert member["location_status"] == "stale"
+    assert member["latitude"] == pytest.approx(VALID_PING["latitude"])
+    assert member["longitude"] == pytest.approx(VALID_PING["longitude"])
