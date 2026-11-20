@@ -6,15 +6,17 @@ import {
   calculateHaversineDistance,
   DEFAULT_CONVOY_LAG_THRESHOLD_KM,
   calculateConvoyCentroid,
+  getMemberLocationStatus,
+  buildBroadcastTelemetryPayload,
 } from '../utils/geolocation';
 import '../styles/convoy.css';
 
 // Helper to render accessible status pill for convoy member cards
-const renderMemberStatusPill = (member) => {
-  if (member.is_ghost_mode || member.location_status === 'hidden') {
+const renderMemberStatusPill = (member, clock) => {
+  const status = getMemberLocationStatus(member, clock);
+  if (status === 'hidden') {
     return <span className="member-status-pill pill-ghost" aria-label="Status: Ghost Mode">🔒 Ghost</span>;
   }
-  const status = member.location_status || (member.latitude != null ? 'fresh' : 'unavailable');
   if (status === 'stale') {
     return <span className="member-status-pill pill-stale" aria-label="Status: Stale">🟡 Stale</span>;
   }
@@ -36,6 +38,21 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
   const [isBroadcasting, setIsBroadcasting] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
   const [ghostMode, setGhostMode] = useState(false);
+  const ghostModeRef = useRef(ghostMode);
+
+  // Sync ref synchronously with state
+  useEffect(() => {
+    ghostModeRef.current = ghostMode;
+  }, [ghostMode]);
+
+  // Live clock: re-evaluates ping aging every 5s without requiring page reload
+  const [clock, setClock] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setClock(Date.now());
+    }, 5000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Local current location state
   const [myLocation, setMyLocation] = useState({
@@ -140,15 +157,13 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
   // 3. Helper to broadcast a telemetry ping (to FastAPI + Supabase Realtime)
   const emitTelemetryPing = async (pingData) => {
     // A. Send sub-second Realtime broadcast to all convoy members
+    // CRITICAL PRIVACY: Mask coordinates to null if Ghost Mode is active so raw GPS is never transmitted over WebSocket!
     if (channelRef.current && isConnected) {
+      const broadcastPayload = buildBroadcastTelemetryPayload(user, pingData);
       channelRef.current.send({
         type: 'broadcast',
         event: 'telemetry_ping',
-        payload: {
-          user_id: user?.id,
-          name: user?.name,
-          ...pingData,
-        },
+        payload: broadcastPayload,
       });
     }
 
@@ -177,12 +192,13 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
       setIsBroadcasting(true);
       geoWatchRef.current = navigator.geolocation.watchPosition(
         (pos) => {
+          const currentGhost = ghostModeRef.current;
           const pingData = {
             latitude: Number(pos.coords.latitude.toFixed(6)),
             longitude: Number(pos.coords.longitude.toFixed(6)),
             speed_kmh: pos.coords.speed ? Number((pos.coords.speed * 3.6).toFixed(1)) : 45.0,
             heading: pos.coords.heading ? Number(pos.coords.heading.toFixed(1)) : 90.0,
-            is_ghost_mode: ghostMode,
+            is_ghost_mode: currentGhost,
           };
           setMyLocation(pingData);
           emitTelemetryPing(pingData);
@@ -207,6 +223,7 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
       let step = 0;
       simTimerRef.current = setInterval(() => {
         step += 1;
+        const currentGhost = ghostModeRef.current;
         const currentSpeed = Math.floor(65 + Math.sin(step / 3) * 15);
         const latOffset = (step * 0.0012);
         const lngOffset = (step * 0.0009);
@@ -216,7 +233,7 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
           longitude: Number((74.1240 + lngOffset).toFixed(6)),
           speed_kmh: currentSpeed,
           heading: Math.floor((45 + (step * 5)) % 360),
-          is_ghost_mode: ghostMode,
+          is_ghost_mode: currentGhost,
         };
 
         setMyLocation(pingData);
@@ -232,7 +249,10 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
 
   // 6. Centroid & Lag Calculations across visible vehicles
   const { leader, validVehicles, laggingMembers, centroid } = useMemo(() => {
-    const valid = members.filter((m) => m.latitude != null && m.longitude != null && !m.is_ghost_mode);
+    const valid = members.filter((m) => {
+      const status = getMemberLocationStatus(m, clock);
+      return m.latitude != null && m.longitude != null && !m.is_ghost_mode && status !== 'hidden';
+    });
 
     if (valid.length === 0) {
       return { leader: null, validVehicles: [], laggingMembers: [], centroid: null };
@@ -261,7 +281,7 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
 
     const cent = calculateConvoyCentroid(valid);
     return { leader: lead, validVehicles: valid, laggingMembers: lagging, centroid: cent };
-  }, [members]);
+  }, [members, clock]);
 
   return (
     <div className="convoy-tracker-container">
@@ -378,6 +398,7 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
               onChange={(e) => {
                 const next = e.target.checked;
                 setGhostMode(next);
+                ghostModeRef.current = next;
                 if (isBroadcasting || isSimulating) {
                   emitTelemetryPing({ ...myLocation, is_ghost_mode: next });
                 }
@@ -514,7 +535,7 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
                         />
                         {member.name}
                         {isLeader && <span style={{ color: '#38bdf8', fontSize: '0.75rem' }}>(Lead Vehicle)</span>}
-                        {renderMemberStatusPill(member)}
+                        {renderMemberStatusPill(member, clock)}
                       </div>
                       <div className="member-speed-badge">
                         {member.speed_kmh != null ? `${member.speed_kmh} km/h` : '0 km/h'}

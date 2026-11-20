@@ -123,38 +123,39 @@ def test_ghost_mode_multi_session_lifecycle(
     assert member_record["speed_kmh"] == 72.5
     assert member_record["heading"] == 180.0
 
-    # Step 3: Member (Session 2) toggles Ghost Mode ON and submits ping
-    ghost_ping = {
-        "latitude": 15.3500,
-        "longitude": 74.1500,
-        "speed_kmh": 80.0,
-        "heading": 195.0,
-        "is_ghost_mode": True,
-    }
-    ghost_sub_res = client.post(
-        f"/trips/{trip_id}/telemetry", json=ghost_ping, headers=auth_header_second
-    )
-    assert ghost_sub_res.status_code == 201, ghost_sub_res.text
-    # Even in submitting member's response, coordinates must be masked
-    assert ghost_sub_res.json()["latitude"] is None
-    assert ghost_sub_res.json()["longitude"] is None
-    assert ghost_sub_res.json()["is_ghost_mode"] is True
+    # Step 3: Member (Session 2) toggles Ghost Mode ON and submits MULTIPLE consecutive updates
+    # Proves coordinates remain masked across several continuous ticks/updates while driving
+    ghost_updates = [
+        {"latitude": 15.3500, "longitude": 74.1500, "speed_kmh": 80.0, "heading": 195.0, "is_ghost_mode": True},
+        {"latitude": 15.3530, "longitude": 74.1520, "speed_kmh": 82.5, "heading": 196.0, "is_ghost_mode": True},
+        {"latitude": 15.3560, "longitude": 74.1550, "speed_kmh": 85.0, "heading": 198.0, "is_ghost_mode": True},
+    ]
 
-    # Step 4: Host (Session 1) reads convoy locations -> Member coords are masked to null!
-    locations_after_ghost = client.get(
-        f"/trips/{trip_id}/convoy/locations", headers=auth_header
-    )
-    assert locations_after_ghost.status_code == 200, locations_after_ghost.text
-    member_ghost_record = next(
-        m for m in locations_after_ghost.json() if m["user_id"] == second_user.id
-    )
-    assert member_ghost_record["is_ghost_mode"] is True
-    assert member_ghost_record["location_status"] == "hidden"
-    assert member_ghost_record["latitude"] is None
-    assert member_ghost_record["longitude"] is None
-    # Speed and heading are retained for convoy formation safety
-    assert member_ghost_record["speed_kmh"] == 80.0
-    assert member_ghost_record["heading"] == 195.0
+    for idx, update_payload in enumerate(ghost_updates, start=1):
+        ghost_sub_res = client.post(
+            f"/trips/{trip_id}/telemetry", json=update_payload, headers=auth_header_second
+        )
+        assert ghost_sub_res.status_code == 201, ghost_sub_res.text
+        # Even in submitting member's response, coordinates must be masked
+        assert ghost_sub_res.json()["latitude"] is None
+        assert ghost_sub_res.json()["longitude"] is None
+        assert ghost_sub_res.json()["is_ghost_mode"] is True
+
+        # Step 4: Host (Session 1) verifies coordinates stay hidden across every single update
+        locations_after_ghost = client.get(
+            f"/trips/{trip_id}/convoy/locations", headers=auth_header
+        )
+        assert locations_after_ghost.status_code == 200, locations_after_ghost.text
+        member_ghost_record = next(
+            m for m in locations_after_ghost.json() if m["user_id"] == second_user.id
+        )
+        assert member_ghost_record["is_ghost_mode"] is True, f"Failed on update {idx}"
+        assert member_ghost_record["location_status"] == "hidden", f"Failed on update {idx}"
+        assert member_ghost_record["latitude"] is None, f"Failed on update {idx}"
+        assert member_ghost_record["longitude"] is None, f"Failed on update {idx}"
+        # Speed and heading are updated and retained for convoy formation safety
+        assert member_ghost_record["speed_kmh"] == update_payload["speed_kmh"]
+        assert member_ghost_record["heading"] == update_payload["heading"]
 
     # Step 5: Member (Session 2) toggles Ghost Mode OFF and submits a new ping
     restored_ping = {

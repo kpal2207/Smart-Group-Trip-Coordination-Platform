@@ -13,7 +13,9 @@ import {
   checkConvoyLag,
   getSpeedBasedPollingInterval,
   calculateBearing,
-  formatDistance
+  formatDistance,
+  getMemberLocationStatus,
+  buildBroadcastTelemetryPayload,
 } from './geolocation.js';
 
 describe('Geolocation & GIS Utilities (Sprint 2)', () => {
@@ -312,6 +314,162 @@ describe('Geolocation & GIS Utilities (Sprint 2)', () => {
     it('should return "--" for null or undefined', () => {
       assert.equal(formatDistance(null), '--');
       assert.equal(formatDistance(undefined), '--');
+    });
+  });
+
+  describe('buildBroadcastTelemetryPayload & Ghost Mode Masking', () => {
+    const mockUser = { id: 42, name: 'Ruhan Driver' };
+
+    it('should retain coordinates when Ghost Mode is OFF', () => {
+      const ping = {
+        latitude: 15.2993,
+        longitude: 74.1240,
+        speed_kmh: 75.0,
+        heading: 180,
+        is_ghost_mode: false,
+      };
+      const broadcast = buildBroadcastTelemetryPayload(mockUser, ping);
+      assert.equal(broadcast.user_id, 42);
+      assert.equal(broadcast.latitude, 15.2993);
+      assert.equal(broadcast.longitude, 74.1240);
+      assert.equal(broadcast.is_ghost_mode, false);
+      assert.equal(broadcast.location_status, 'fresh');
+    });
+
+    it('should mask coordinates to null before WebSocket broadcast when Ghost Mode is ON', () => {
+      const ping = {
+        latitude: 15.2993,
+        longitude: 74.1240,
+        speed_kmh: 80.0,
+        heading: 185,
+        is_ghost_mode: true,
+      };
+      const broadcast = buildBroadcastTelemetryPayload(mockUser, ping);
+      assert.equal(broadcast.user_id, 42);
+      assert.equal(broadcast.latitude, null);
+      assert.equal(broadcast.longitude, null);
+      assert.equal(broadcast.is_ghost_mode, true);
+      assert.equal(broadcast.location_status, 'hidden');
+      // Speed and heading remain for convoy spacing safety
+      assert.equal(broadcast.speed_kmh, 80.0);
+      assert.equal(broadcast.heading, 185);
+    });
+
+    it('should ensure the next scheduled ping reflects dynamically toggled Ghost Mode setting', () => {
+      let currentGhostModeSetting = false;
+
+      // Simulated scheduler callback that reads dynamic setting
+      const generateNextScheduledPing = (step) => {
+        const pingData = {
+          latitude: 15.2993 + (step * 0.001),
+          longitude: 74.1240 + (step * 0.001),
+          speed_kmh: 60,
+          heading: 90,
+          is_ghost_mode: currentGhostModeSetting,
+        };
+        return buildBroadcastTelemetryPayload(mockUser, pingData);
+      };
+
+      // Step 1: Simulator starts with Ghost Mode OFF
+      const tick1 = generateNextScheduledPing(1);
+      assert.ok(tick1.latitude !== null && tick1.longitude !== null);
+      assert.equal(tick1.is_ghost_mode, false);
+
+      // User toggles Ghost Mode ON
+      currentGhostModeSetting = true;
+
+      // Step 2: Next scheduled ping MUST use current setting and mask coordinates
+      const tick2 = generateNextScheduledPing(2);
+      assert.equal(tick2.latitude, null);
+      assert.equal(tick2.longitude, null);
+      assert.equal(tick2.is_ghost_mode, true);
+      assert.equal(tick2.location_status, 'hidden');
+
+      // Step 3: Subsequent scheduled ping continues to stay masked
+      const tick3 = generateNextScheduledPing(3);
+      assert.equal(tick3.latitude, null);
+      assert.equal(tick3.longitude, null);
+      assert.equal(tick3.is_ghost_mode, true);
+
+      // User toggles Ghost Mode back OFF
+      currentGhostModeSetting = false;
+
+      // Step 4: Next scheduled ping restores coordinates
+      const tick4 = generateNextScheduledPing(4);
+      assert.ok(tick4.latitude !== null && tick4.longitude !== null);
+      assert.equal(tick4.is_ghost_mode, false);
+      assert.equal(tick4.location_status, 'fresh');
+    });
+  });
+
+  describe('getMemberLocationStatus & Realtime Telemetry Aging', () => {
+    const baseTime = new Date('2026-11-20T12:00:00Z');
+
+    it('should return fresh when ping is within 60 seconds', () => {
+      const member = {
+        user_id: 1,
+        name: 'Lead Driver',
+        latitude: 15.2993,
+        longitude: 74.1240,
+        is_ghost_mode: false,
+        recorded_at: baseTime.toISOString(),
+      };
+
+      // Evaluated at 0s, 30s, and exactly 60s
+      assert.equal(getMemberLocationStatus(member, new Date('2026-11-20T12:00:00Z')), 'fresh');
+      assert.equal(getMemberLocationStatus(member, new Date('2026-11-20T12:00:30Z')), 'fresh');
+      assert.equal(getMemberLocationStatus(member, new Date('2026-11-20T12:01:00Z')), 'fresh');
+    });
+
+    it('should transition to stale when ping is between 61s and 300s old', () => {
+      const member = {
+        user_id: 2,
+        name: 'Lagging Car',
+        latitude: 15.2993,
+        longitude: 74.1240,
+        is_ghost_mode: false,
+        recorded_at: baseTime.toISOString(),
+      };
+
+      // 61 seconds (1m 1s)
+      assert.equal(getMemberLocationStatus(member, new Date('2026-11-20T12:01:01Z')), 'stale');
+      // 180 seconds (3 minutes)
+      assert.equal(getMemberLocationStatus(member, new Date('2026-11-20T12:03:00Z')), 'stale');
+      // 300 seconds (exactly 5 minutes)
+      assert.equal(getMemberLocationStatus(member, new Date('2026-11-20T12:05:00Z')), 'stale');
+    });
+
+    it('should transition to unavailable when ping is older than 5 minutes (300s)', () => {
+      const member = {
+        user_id: 3,
+        name: 'Offline Vehicle',
+        latitude: 15.2993,
+        longitude: 74.1240,
+        is_ghost_mode: false,
+        recorded_at: baseTime.toISOString(),
+      };
+
+      // 301 seconds (5m 1s)
+      assert.equal(getMemberLocationStatus(member, new Date('2026-11-20T12:05:01Z')), 'unavailable');
+      // 360 seconds (6 minutes)
+      assert.equal(getMemberLocationStatus(member, new Date('2026-11-20T12:06:00Z')), 'unavailable');
+      // 1 hour later
+      assert.equal(getMemberLocationStatus(member, new Date('2026-11-20T13:00:00Z')), 'unavailable');
+    });
+
+    it('should always return hidden when member is in Ghost Mode regardless of age', () => {
+      const ghostMember = {
+        user_id: 4,
+        name: 'Ghost Vehicle',
+        latitude: null,
+        longitude: null,
+        is_ghost_mode: true,
+        recorded_at: baseTime.toISOString(),
+      };
+
+      assert.equal(getMemberLocationStatus(ghostMember, new Date('2026-11-20T12:00:10Z')), 'hidden');
+      assert.equal(getMemberLocationStatus(ghostMember, new Date('2026-11-20T12:02:00Z')), 'hidden');
+      assert.equal(getMemberLocationStatus(ghostMember, new Date('2026-11-20T12:10:00Z')), 'hidden');
     });
   });
 });
