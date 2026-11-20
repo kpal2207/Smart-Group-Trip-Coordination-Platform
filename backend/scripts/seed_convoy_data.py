@@ -5,18 +5,19 @@ Run from the backend directory:
     python -m scripts.seed_convoy_data --reset
     python -m scripts.seed_convoy_data --db-url sqlite:///./dev.db
 
-The script creates/updates the four application users, one demo trip, four
-memberships, and five telemetry pings. It does NOT create Supabase Auth
+The script creates/updates four application users, one demo trip, their four
+memberships, and five identifiable demo telemetry pings. It does NOT create Supabase Auth
 identities. Users are application records associated by email when an
 authenticated Supabase user reaches the backend.
 
-Reruns are idempotent. Telemetry for this dedicated demo trip is replaced on
-each run so partial or stale seed data cannot accumulate.
+Normal reruns preserve existing telemetry and add only missing demo pings.
+Use --reset to explicitly clear and recreate telemetry for the demo trip.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -31,8 +32,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 
-from app.database import Base, SQL_DATABASE_URL
-from app.models import User, Trip, TripMember, MemberRole, ConvoyTelemetry
+# App database/models are loaded lazily so an explicit SQLite URL can be
+# applied to the environment before app.database initializes project settings.
 
 
 TRIP_CODE = "GOASP2DM"
@@ -81,15 +82,10 @@ SEED_PINGS = [
     (3, 21.0900, 72.7800, 0.0, None, False, 360),    # Rahul — 6 hours ago
 ]
 
-MEMBER_ROLES = [
-    MemberRole.host,
-    MemberRole.member,
-    MemberRole.member,
-    MemberRole.member,
-]
+MEMBER_ROLE_NAMES = ["host", "member", "member", "member"]
 
 
-def _get_or_create_user(db, user_data: dict) -> User:
+def _get_or_create_user(db, user_data: dict):
     """Find the application user by email, or create its local DB record.
 
     Existing password hashes are deliberately preserved. New rows use the
@@ -107,7 +103,7 @@ def _get_or_create_user(db, user_data: dict) -> User:
     return user
 
 
-def _get_or_create_trip(db, trip_data: dict, host_id: int) -> Trip:
+def _get_or_create_trip(db, trip_data: dict, host_id: int):
     """Find the demo trip by its stable trip code, or create it."""
     trip = db.query(Trip).filter(Trip.trip_code == TRIP_CODE).first()
 
@@ -124,7 +120,7 @@ def _get_or_create_trip(db, trip_data: dict, host_id: int) -> Trip:
     return trip
 
 
-def _ensure_membership(db, trip_id: int, user_id: int, role: MemberRole) -> TripMember:
+def _ensure_membership(db, trip_id: int, user_id: int, role):
     """Ensure exactly one membership for this trip/user pair."""
     membership = (
         db.query(TripMember)
@@ -157,41 +153,80 @@ def _safe_database_label(target_url) -> str:
         return "<configured database>"
 
 
+def _load_app_components(db_url: str | None):
+    """Load app models, preparing settings first for explicit SQLite use."""
+    if db_url:
+        parsed_url = make_url(db_url)
+        if parsed_url.drivername.startswith("sqlite"):
+            # app.database creates its configured engine during import. Set
+            # SQLite settings first so PostgreSQL credentials are not required.
+            os.environ["DATABASE_DIALECT"] = parsed_url.drivername
+            os.environ["DATABASE_NAME"] = parsed_url.database or ":memory:"
+            # Some project Settings classes validate all DB fields eagerly,
+            # even though app.database does not use these for SQLite.
+            os.environ.setdefault("DATABASE_USER", "sqlite_unused")
+            os.environ.setdefault("DATABASE_PASSWORD", "sqlite_unused")
+            os.environ.setdefault("DATABASE_HOST", "localhost")
+            os.environ.setdefault("DATABASE_PORT", "5432")
+
+    from app.database import Base, SQL_DATABASE_URL
+    from app.models import User, Trip, TripMember, MemberRole, ConvoyTelemetry
+
+    # Helper functions below resolve these model classes at module scope.
+    globals().update({
+        "User": User,
+        "Trip": Trip,
+        "TripMember": TripMember,
+    })
+    return Base, SQL_DATABASE_URL, User, Trip, TripMember, MemberRole, ConvoyTelemetry
+
+
+def _seed_ping_query(db, telemetry_model, trip_id, user_id,
+                     lat, lon, speed, heading, ghost):
+    """Find a demo ping by its stable payload signature.
+
+    The current telemetry schema has no seed/source marker column, so the
+    demo ping's user and distinctive payload identify it across reruns.
+    """
+    query = db.query(telemetry_model).filter(
+        telemetry_model.trip_id == trip_id,
+        telemetry_model.user_id == user_id,
+        telemetry_model.latitude == lat,
+        telemetry_model.longitude == lon,
+        telemetry_model.speed_kmh == speed,
+        telemetry_model.is_ghost_mode.is_(ghost),
+    )
+    if heading is None:
+        query = query.filter(telemetry_model.heading.is_(None))
+    else:
+        query = query.filter(telemetry_model.heading == heading)
+    return query
+
+
 def seed(db_url: str | None = None, reset: bool = False) -> dict:
-    """Seed the demo records and return the verified counts."""
+    """Seed demo records without deleting rehearsal telemetry."""
     started_at = time.perf_counter()
 
-    if db_url:
-        target_url = db_url
-        is_sqlite = db_url.startswith("sqlite")
-    else:
-        target_url = SQL_DATABASE_URL
-        is_sqlite = SQL_DATABASE_URL.drivername.startswith("sqlite")
-
+    Base, SQL_DATABASE_URL, User, Trip, TripMember, MemberRole, ConvoyTelemetry = (
+        _load_app_components(db_url)
+    )
+    target_url = db_url if db_url else SQL_DATABASE_URL
+    is_sqlite = make_url(str(target_url)).drivername.startswith("sqlite")
     connect_args = {"check_same_thread": False} if is_sqlite else {}
     engine = create_engine(target_url, connect_args=connect_args)
 
     try:
-        # Create tables only for the explicitly requested local SQLite target.
-        # PostgreSQL/Supabase schema is managed by Alembic migrations.
         if is_sqlite:
             from app.db_bootstrap import bootstrap_users
-
             bootstrap_users(engine)
             Base.metadata.create_all(bind=engine)
 
-        Session = sessionmaker(
-            autocommit=False,
-            autoflush=False,
-            bind=engine,
-        )
+        Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
         db = Session()
-
         try:
             print("👤 Seeding application users...")
             users = [_get_or_create_user(db, user_data) for user_data in SEED_USERS]
             db.flush()
-
             for user in users:
                 print(f"   ✅ {user.name} ({user.email}, id={user.id})")
 
@@ -200,82 +235,118 @@ def seed(db_url: str | None = None, reset: bool = False) -> dict:
             db.flush()
             print(f"   ✅ {trip.title} (code={trip.trip_code})")
 
-            print("\n🤝 Ensuring trip memberships...")
-            for user, role in zip(users, MEMBER_ROLES):
+            print("\n🤝 Ensuring demo memberships...")
+            for user, role_name in zip(users, MEMBER_ROLE_NAMES):
+                role = getattr(MemberRole, role_name)
                 membership = _ensure_membership(db, trip.id, user.id, role)
                 print(f"   ✅ {user.name} → {role.value} (membership id={membership.id})")
 
-            # This is a dedicated demo trip. Replacing only its telemetry makes
-            # repeated runs deterministic without touching other trips/users.
             if reset:
-                print("\n♻️  Reset requested: clearing this demo trip's telemetry...")
+                print("\n♻️  Reset requested: refreshing only the five demo seed pings...")
+            else:
+                print("\n📡 Ensuring demo telemetry (existing GPS history is preserved)...")
 
-            db.query(ConvoyTelemetry).filter(
-                ConvoyTelemetry.trip_id == trip.id
-            ).delete(synchronize_session=False)
+            if reset:
+                # Explicit reset replaces telemetry for this dedicated demo trip.
+                # Normal runs never delete existing telemetry.
+                db.query(ConvoyTelemetry).filter(
+                    ConvoyTelemetry.trip_id == trip.id
+                ).delete(synchronize_session=False)
 
-            print("\n📡 Re-seeding telemetry...")
             now = datetime.now(timezone.utc)
+            inserted_pings = 0
+            preserved_pings = 0
 
             for user_index, lat, lon, speed, heading, ghost, minutes_ago in SEED_PINGS:
-                ping = ConvoyTelemetry(
-                    trip_id=trip.id,
-                    user_id=users[user_index].id,
-                    latitude=lat,
-                    longitude=lon,
-                    speed_kmh=speed,
-                    heading=heading,
-                    is_ghost_mode=ghost,
-                    recorded_at=now - timedelta(minutes=minutes_ago),
+                signature_query = _seed_ping_query(
+                    db, ConvoyTelemetry, trip.id, users[user_index].id,
+                    lat, lon, speed, heading, ghost,
                 )
-                db.add(ping)
+
+                if reset:
+                    # The trip's telemetry was explicitly cleared above.
+                    existing_ping = None
+                else:
+                    existing_ping = signature_query.first()
+
+                if existing_ping is None:
+                    db.add(ConvoyTelemetry(
+                        trip_id=trip.id,
+                        user_id=users[user_index].id,
+                        latitude=lat,
+                        longitude=lon,
+                        speed_kmh=speed,
+                        heading=heading,
+                        is_ghost_mode=ghost,
+                        recorded_at=now - timedelta(minutes=minutes_ago),
+                    ))
+                    inserted_pings += 1
+                    action = "added"
+                else:
+                    preserved_pings += 1
+                    action = "preserved"
 
                 status = "🔒 GHOST" if ghost else (
                     "🟢 fresh" if minutes_ago <= 1 else f"⏳ {minutes_ago}m ago"
                 )
-                print(f"   ✅ {users[user_index].name}: {lat}, {lon} — {status}")
+                print(f"   ✅ {users[user_index].name}: {lat}, {lon} — {status} ({action})")
 
-            # Commit all seed changes together.
             db.flush()
 
-            # Verify only the records belonging to this dedicated demo trip.
             user_count = (
                 db.query(User)
                 .filter(User.email.in_([u["email"] for u in SEED_USERS]))
                 .count()
             )
-            trip_count = (
-                db.query(Trip)
-                .filter(Trip.trip_code == TRIP_CODE)
-                .count()
+            trip_count = db.query(Trip).filter(Trip.trip_code == TRIP_CODE).count()
+            total_member_count = (
+                db.query(TripMember).filter(TripMember.trip_id == trip.id).count()
             )
-            member_count = (
-                db.query(TripMember)
-                .filter(TripMember.trip_id == trip.id)
-                .count()
-            )
-            ping_count = (
+
+            missing_demo_members = []
+            for user in users:
+                exists = (
+                    db.query(TripMember)
+                    .filter(
+                        TripMember.trip_id == trip.id,
+                        TripMember.user_id == user.id,
+                    )
+                    .first()
+                )
+                if exists is None:
+                    missing_demo_members.append(user.email)
+
+            seeded_ping_counts = []
+            for user_index, lat, lon, speed, heading, ghost, _minutes_ago in SEED_PINGS:
+                count = _seed_ping_query(
+                    db, ConvoyTelemetry, trip.id, users[user_index].id,
+                    lat, lon, speed, heading, ghost,
+                ).count()
+                seeded_ping_counts.append(count)
+
+            seeded_ping_count = sum(count >= 1 for count in seeded_ping_counts)
+            total_ping_count = (
                 db.query(ConvoyTelemetry)
                 .filter(ConvoyTelemetry.trip_id == trip.id)
                 .count()
             )
-            ghost_count = (
-                db.query(ConvoyTelemetry)
-                .filter(
-                    ConvoyTelemetry.trip_id == trip.id,
-                    ConvoyTelemetry.is_ghost_mode.is_(True),
-                )
-                .count()
+            seeded_ghost_count = sum(
+                1 for spec, count in zip(SEED_PINGS, seeded_ping_counts)
+                if spec[5] and count >= 1
             )
 
-            # Validate before committing; a failed assertion rolls back the seed.
             assert user_count == 4, f"Expected 4 seeded users, got {user_count}"
             assert trip_count == 1, f"Expected 1 trip with code {TRIP_CODE}, got {trip_count}"
-            assert member_count == 4, f"Expected 4 memberships, got {member_count}"
-            assert ping_count == len(SEED_PINGS), (
-                f"Expected {len(SEED_PINGS)} telemetry pings, got {ping_count}"
+            assert not missing_demo_members, (
+                "Missing demo memberships: " + ", ".join(missing_demo_members)
             )
-            assert ghost_count == 1, f"Expected 1 Ghost Mode ping, got {ghost_count}"
+            assert seeded_ping_count == len(SEED_PINGS), (
+                f"Expected {len(SEED_PINGS)} identifiable demo pings, "
+                f"found {seeded_ping_count}"
+            )
+            assert seeded_ghost_count == 1, (
+                f"Expected 1 demo Ghost Mode ping, got {seeded_ghost_count}"
+            )
 
             db.commit()
             elapsed = time.perf_counter() - started_at
@@ -283,37 +354,38 @@ def seed(db_url: str | None = None, reset: bool = False) -> dict:
             print("\n" + "=" * 58)
             print("SEED VERIFICATION SUMMARY")
             print("=" * 58)
-            print(f"  Database:     {_safe_database_label(target_url)}")
-            print(f"  Users:        {user_count} (expected: 4)")
-            print(f"  Trips:        {trip_count} (expected: 1 for this trip code)")
-            print(f"  Trip code:    {trip.trip_code}")
-            print(f"  Memberships:  {member_count} (expected: 4)")
-            print(f"  Telemetry:    {ping_count} (expected: {len(SEED_PINGS)})")
-            print(f"  Ghost pings:  {ghost_count} (expected: 1 — Manthan)")
-            print(f"  Runtime:      {elapsed:.2f}s (target: under 5s)")
+            print(f"  Database:          {_safe_database_label(target_url)}")
+            print(f"  Application users: {user_count} (expected: 4)")
+            print(f"  Demo trips:        {trip_count} (expected: 1)")
+            print(f"  Trip code:         {trip.trip_code}")
+            print(f"  Total members:     {total_member_count} (includes extra testers)")
+            print(f"  Demo seed pings:   {seeded_ping_count} (expected: {len(SEED_PINGS)})")
+            print(f"  Total trip pings:  {total_ping_count} (includes rehearsal history)")
+            print(f"  Demo Ghost pings:  {seeded_ghost_count} (expected: 1 — Manthan)")
+            print(f"  Added this run:    {inserted_pings}")
+            print(f"  Preserved:         {preserved_pings}")
+            print(f"  Runtime:           {elapsed:.2f}s (target: under 5s)")
             print("=" * 58)
-
             print("\n✅ All database assertions passed.")
-            if elapsed < 5:
-                print("✅ Runtime is under 5 seconds.")
-            else:
-                print("⚠️ Runtime exceeded 5 seconds.")
+            print("✅ Runtime is under 5 seconds." if elapsed < 5
+                  else "⚠️ Runtime exceeded 5 seconds.")
 
             return {
                 "users": user_count,
                 "trips": trip_count,
-                "memberships": member_count,
-                "telemetry": ping_count,
-                "ghost_pings": ghost_count,
+                "memberships": total_member_count,
+                "demo_telemetry": seeded_ping_count,
+                "telemetry": total_ping_count,
+                "ghost_pings": seeded_ghost_count,
+                "inserted_pings": inserted_pings,
+                "preserved_pings": preserved_pings,
                 "runtime_seconds": elapsed,
             }
-
         except Exception:
             db.rollback()
             raise
         finally:
             db.close()
-
     finally:
         engine.dispose()
 
@@ -335,8 +407,8 @@ def main() -> int:
         "--reset",
         action="store_true",
         help=(
-            "Rebuild telemetry for the GOASP2DM demo trip. "
-            "Application users and the trip itself are preserved."
+            "Explicitly clear and recreate telemetry for GOASP2DM. "
+            "Users, the trip, and extra members are preserved."
         ),
     )
     args = parser.parse_args()
