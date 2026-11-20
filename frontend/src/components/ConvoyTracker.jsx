@@ -9,6 +9,21 @@ import {
 } from '../utils/geolocation';
 import '../styles/convoy.css';
 
+// Helper to render accessible status pill for convoy member cards
+const renderMemberStatusPill = (member) => {
+  if (member.is_ghost_mode || member.location_status === 'hidden') {
+    return <span className="member-status-pill pill-ghost" aria-label="Status: Ghost Mode">🔒 Ghost</span>;
+  }
+  const status = member.location_status || (member.latitude != null ? 'fresh' : 'unavailable');
+  if (status === 'stale') {
+    return <span className="member-status-pill pill-stale" aria-label="Status: Stale">🟡 Stale</span>;
+  }
+  if (status === 'unavailable') {
+    return <span className="member-status-pill pill-unavailable" aria-label="Status: Unavailable">⚪ Unavailable</span>;
+  }
+  return <span className="member-status-pill pill-fresh" aria-label="Status: Fresh">🟢 Fresh</span>;
+};
+
 const ConvoyTracker = ({ tripId, tripTitle }) => {
   const { user } = useContext(AuthContext);
 
@@ -295,6 +310,29 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
         </div>
       )}
 
+      {/* Telemetry Status Legend (Sprint 2 - Issue #4) */}
+      <div className="convoy-status-legend" role="region" aria-label="Convoy Telemetry Status Legend">
+        <div className="status-legend-title">Location Status Legend:</div>
+        <div className="status-legend-items">
+          <div className="status-legend-badge badge-fresh" title="Ping recorded within the last 60 seconds">
+            <span className="dot dot-fresh" aria-hidden="true" />
+            <span>Fresh (≤ 60s)</span>
+          </div>
+          <div className="status-legend-badge badge-stale" title="Ping recorded between 1 and 5 minutes ago">
+            <span className="dot dot-stale" aria-hidden="true" />
+            <span>Stale (1–5m)</span>
+          </div>
+          <div className="status-legend-badge badge-unavailable" title="No ping received in over 5 minutes or offline">
+            <span className="dot dot-unavailable" aria-hidden="true" />
+            <span>Unavailable (&gt; 5m)</span>
+          </div>
+          <div className="status-legend-badge badge-ghost" title="Privacy mode: coordinates are masked to null">
+            <span className="dot dot-ghost" aria-hidden="true" />
+            <span>Ghost Mode (Hidden)</span>
+          </div>
+        </div>
+      </div>
+
       {/* Control Actions Bar */}
       <div className="convoy-controls-grid">
         {/* Device GPS Toggle */}
@@ -432,7 +470,7 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
             </div>
             <div className="legend-item">
               <span className="legend-dot" style={{ background: '#64748b' }} />
-              <span>Ghost / Masked</span>
+              <span>Ghost (Hidden from Radar)</span>
             </div>
           </div>
         </div>
@@ -472,10 +510,11 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
                             background: isOnline ? '#10b981' : '#64748b',
                             display: 'inline-block',
                           }}
+                          title={isOnline ? 'Online in Realtime Channel' : 'Offline'}
                         />
                         {member.name}
                         {isLeader && <span style={{ color: '#38bdf8', fontSize: '0.75rem' }}>(Lead Vehicle)</span>}
-                        {member.is_ghost_mode && <span style={{ color: '#94a3b8', fontSize: '0.72rem' }}>[GHOST]</span>}
+                        {renderMemberStatusPill(member)}
                       </div>
                       <div className="member-speed-badge">
                         {member.speed_kmh != null ? `${member.speed_kmh} km/h` : '0 km/h'}
