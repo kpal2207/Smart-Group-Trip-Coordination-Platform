@@ -1,41 +1,27 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useContext } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { MapPin, DollarSign, ArrowLeft, Copy, Check, Share2 } from 'lucide-react';
 import { getTripDetails } from '../api/trip';
 import { AuthContext } from '../context/AuthContext';
+import ConvoyTracker from '../components/ConvoyTracker';
 
 const TripDetails = () => {
   const { tripId } = useParams();
   const { user } = useContext(AuthContext);
 
-  const [trip, setTrip] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState('');
-
   const [copyCodeSuccess, setCopyCodeSuccess] = useState(false);
   const [copyLinkSuccess, setCopyLinkSuccess] = useState(false);
 
-  useEffect(() => {
-    const fetchTrip = async () => {
-      setLoading(true);
-      setErrorMsg('');
-      try {
-        const res = await getTripDetails(tripId);
-        setTrip(res.data);
-      } catch (err) {
-        if (err.response?.status === 404) {
-          setErrorMsg('Trip not found or you are not a member.');
-        } else {
-          setErrorMsg(err.response?.data?.detail || 'Failed to load trip details.');
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
+  const { data: trip, isLoading, error } = useQuery({
+    queryKey: ['trip', tripId],
+    queryFn: () => getTripDetails(tripId).then((res) => res.data),
+    enabled: !!tripId,
+  });
 
-    if (tripId) {
-      fetchTrip();
-    }
-  }, [tripId]);
+  const errorMsg = error?.response?.status === 404
+    ? 'Trip not found or you are not a member.'
+    : error?.response?.data?.detail || error?.message;
 
   const handleCopyCode = async () => {
     if (!trip?.trip_code) return;
@@ -61,7 +47,7 @@ const TripDetails = () => {
     }
   };
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="trip-page-container">
         <div className="loading-container" style={{ height: '300px' }}>
@@ -101,14 +87,18 @@ const TripDetails = () => {
               {isHost ? 'Host' : 'Member'}
             </span>
           </div>
-          <p style={{ color: 'var(--text-muted)' }}>📍 {trip.destination}</p>
+          <p style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <MapPin size={16} /> {trip.destination}
+          </p>
         </div>
         <div className="page-header-actions">
           <Link to={`/trips/${trip.id}/expenses`} className="btn btn-primary btn-sm">
-            💰 Expenses & Splits
+            <DollarSign size={14} style={{ marginRight: '4px' }} />
+            Expenses & Splits
           </Link>
           <Link to="/trips" className="btn btn-secondary btn-sm">
-            &larr; Back to My Trips
+            <ArrowLeft size={14} style={{ marginRight: '4px' }} />
+            Back to My Trips
           </Link>
         </div>
       </div>
@@ -157,8 +147,9 @@ const TripDetails = () => {
               type="button"
               onClick={handleCopyCode}
               className="btn btn-secondary btn-sm"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
             >
-              {copyCodeSuccess ? 'Code Copied!' : 'Copy Code'}
+              {copyCodeSuccess ? <><Check size={14} /> Code Copied!</> : <><Copy size={14} /> Copy Code</>}
             </button>
             {copyCodeSuccess && <span className="copy-feedback">Copied to clipboard!</span>}
           </div>
@@ -178,14 +169,18 @@ const TripDetails = () => {
                 type="button"
                 onClick={handleCopyLink}
                 className="btn btn-primary btn-sm"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
               >
-                {copyLinkSuccess ? 'Link Copied!' : 'Copy Link'}
+                {copyLinkSuccess ? <><Check size={14} /> Link Copied!</> : <><Share2 size={14} /> Copy Link</>}
               </button>
             </div>
             {copyLinkSuccess && <div className="copy-feedback">Link copied! Share it with your group.</div>}
           </div>
         </div>
       </div>
+
+      {/* Real-Time Convoy GPS Telemetry & Radar Sync */}
+      <ConvoyTracker tripId={trip.id} tripTitle={trip.title} />
     </div>
   );
 };

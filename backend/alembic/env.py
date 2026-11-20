@@ -8,18 +8,19 @@ import sys
 # Add the project root directory to the sys.path so we can import from app
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
-from app.config import settings
-from app.database import Base
-# Import the model package before reading Base.metadata so every registered
-# model, including expenses and convoy telemetry, is available to autogenerate.
-import app.models  # noqa: F401
+from app.database import Base, SQL_DATABASE_URL
+# Import all models here so Alembic can discover them for autogenerate
+import app.models # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
 
-# Set the database URL in the Alembic config from our application settings
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# Set the database URL from the same SQLAlchemy URL used by the application.
+config.set_main_option(
+    "sqlalchemy.url",
+    SQL_DATABASE_URL.render_as_string(hide_password=False).replace("%", "%%"),
+)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

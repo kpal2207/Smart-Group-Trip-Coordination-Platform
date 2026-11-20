@@ -31,24 +31,36 @@ def get_current_user(
     )
 
     if token is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise credentials_exception
 
     # Decode token to get payload
     payload = decode_access_token(token.credentials)
     if payload is None:
         raise credentials_exception
 
-    email: str = payload.get("sub")
-    if email is None:
+    # Supabase uses 'email' field or 'sub'; local tokens use 'sub' as email
+    email: str = payload.get("email") or payload.get("sub")
+    if not email or "@" not in email:
+        # If 'sub' is a UUID and email is in user_metadata
+        metadata = payload.get("user_metadata", {})
+        email = metadata.get("email") or email
+
+    if not email or "@" not in email:
         raise credentials_exception
 
     # Look up user in DB
     user = db.query(User).filter(User.email == email).first()
     if user is None:
-        raise credentials_exception
+        # Auto-provision user from Supabase authenticated token (e.g. Google Login)
+        metadata = payload.get("user_metadata", {})
+        name = metadata.get("name") or metadata.get("full_name") or email.split("@")[0]
+        user = User(
+            name=name,
+            email=email,
+            password_hash="supabase_managed",
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
 
     return user

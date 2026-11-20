@@ -1,31 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { Link } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { RotateCw, UserPlus, Plus } from 'lucide-react';
 import { getMyTrips } from '../api/trip';
 import TripCard from '../components/TripCard';
 
 const MyTrips = () => {
-  const [trips, setTrips] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState('');
+  const { data: trips = [], isLoading, error, refetch, isFetching } = useQuery({
+    queryKey: ['myTrips'],
+    queryFn: () => getMyTrips().then((res) => res.data || []),
+  });
 
-  const fetchTrips = async () => {
-    setLoading(true);
-    setErrorMsg('');
-    try {
-      const res = await getMyTrips();
-      setTrips(res.data || []);
-    } catch (err) {
-      setErrorMsg(
-        err.response?.data?.detail || 'Failed to load your trips. Please check your connection and try again.'
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchTrips();
-  }, []);
+  const errorMsg = error?.response?.data?.detail || error?.message;
 
   return (
     <div className="trip-page-container">
@@ -39,17 +25,20 @@ const MyTrips = () => {
         <div className="page-header-actions">
           <button
             type="button"
-            onClick={fetchTrips}
+            onClick={() => refetch()}
             className="btn btn-secondary btn-sm"
-            disabled={loading}
+            disabled={isFetching}
           >
-            ↻ Refresh
+            <RotateCw size={14} className={isFetching ? 'spin' : ''} style={{ marginRight: '6px' }} />
+            {isFetching ? 'Refreshing...' : 'Refresh'}
           </button>
           <Link to="/trips/join" className="btn btn-secondary btn-sm">
+            <UserPlus size={14} style={{ marginRight: '6px' }} />
             Join Trip
           </Link>
           <Link to="/trips/create" className="btn btn-primary btn-sm">
-            + Create Trip
+            <Plus size={14} style={{ marginRight: '6px' }} />
+            Create Trip
           </Link>
         </div>
       </div>
@@ -60,7 +49,7 @@ const MyTrips = () => {
           <p>{errorMsg}</p>
           <button
             type="button"
-            onClick={fetchTrips}
+            onClick={() => refetch()}
             className="btn btn-secondary btn-sm"
             style={{ marginTop: '10px' }}
           >
@@ -70,7 +59,7 @@ const MyTrips = () => {
       )}
 
       {/* Loading state */}
-      {loading ? (
+      {isLoading ? (
         <div className="loading-container" style={{ height: '300px' }}>
           <div className="spinner"></div>
           <p>Loading your trips...</p>

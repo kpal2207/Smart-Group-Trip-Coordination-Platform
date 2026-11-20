@@ -1,6 +1,13 @@
 # ===== Environment & Secrets =====
 .env
+.env.*
+!.env.example
+!.env.docker.example
 *.env.local
+backend/.env
+backend/.env.*
+!backend/.env.example
+!backend/.env.docker.example
 
 # ===== Python =====
 __pycache__/
@@ -45,3 +52,4 @@ coverage.xml
 *.log
 *.db
 .vite/
+.agents

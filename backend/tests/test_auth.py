@@ -47,43 +47,18 @@ def test_register_invalid_email(client):
     )
     assert response.status_code == 422
 
-def test_register_weak_password(client):
-    """Test registration fails with weak password."""
-    # Too short
+def test_register_delegates_password_format_to_supabase(client):
+    """Test registration accepts password format as complexity is enforced by Supabase Auth."""
     response = client.post(
         "/auth/register",
         json={
             "name": "User",
-            "email": "user1@example.com",
-            "password": "Wk1",
-            "password_confirm": "Wk1"
+            "email": "user_format@example.com",
+            "password": "simplepassword",
+            "password_confirm": "simplepassword"
         }
     )
-    assert response.status_code == 422
-    
-    # No uppercase
-    response = client.post(
-        "/auth/register",
-        json={
-            "name": "User",
-            "email": "user2@example.com",
-            "password": "password123!",
-            "password_confirm": "password123!"
-        }
-    )
-    assert response.status_code == 422
-    
-    # No digit
-    response = client.post(
-        "/auth/register",
-        json={
-            "name": "User",
-            "email": "user3@example.com",
-            "password": "Password!",
-            "password_confirm": "Password!"
-        }
-    )
-    assert response.status_code == 422
+    assert response.status_code == 201
 
 def test_register_password_mismatch(client):
     """Test registration fails when passwords do not match."""
@@ -228,4 +203,29 @@ def test_logout_authenticated(client, test_user):
 def test_logout_no_token(client):
     """Test logout fails without token."""
     response = client.post("/auth/logout")
+    assert response.status_code == 401
+
+
+def test_forged_unverified_token_rejected(client):
+    """Security test: tokens signed with unknown secrets must be rejected."""
+    from jose import jwt
+    from datetime import datetime, timedelta, timezone
+
+    fake_payload = {
+        "sub": "victim@example.com",
+        "email": "victim@example.com",
+        "exp": int((datetime.now(timezone.utc) + timedelta(hours=1)).timestamp())
+    }
+    fake_token = jwt.encode(fake_payload, "attacker-secret-key", algorithm="HS256")
+    response = client.get("/auth/me", headers={"Authorization": f"Bearer {fake_token}"})
+    assert response.status_code == 401
+
+
+def test_token_missing_email_rejected(client):
+    """Tokens with UUID sub and no email field must be rejected."""
+    from app.services.auth import create_access_token
+
+    # Token signed with correct key, but sub is UUID without @ and no email
+    token = create_access_token(data={"sub": "12345678-1234-5678-1234-567812345678"})
+    response = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 401

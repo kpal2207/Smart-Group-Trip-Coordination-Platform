@@ -79,6 +79,10 @@ class Expense(Base):
     splits = relationship("ExpenseSplit", back_populates="expense", cascade="all, delete-orphan")
     disputes = relationship("Dispute", back_populates="expense", cascade="all, delete-orphan")
 
+    @property
+    def payer_name(self) -> str:
+        return self.payer.name if self.payer else "Unknown"
+
 
 class ExpenseSplit(Base):
     """
@@ -101,6 +105,14 @@ class ExpenseSplit(Base):
 
     expense = relationship("Expense", back_populates="splits")
     user = relationship("User", foreign_keys=[user_id])
+
+    @property
+    def user_name(self) -> str:
+        return self.user.name if self.user else "Unknown"
+
+    @property
+    def user_email(self) -> str:
+        return self.user.email if self.user else ""
 
 
 class Dispute(Base):
@@ -128,6 +140,10 @@ class Dispute(Base):
     expense = relationship("Expense", back_populates="disputes")
     raised_by = relationship("User", foreign_keys=[raised_by_id])
 
+    @property
+    def raised_by_name(self) -> str:
+        return self.raised_by.name if self.raised_by else "Unknown"
+
 
 class Settlement(Base):
     """
@@ -153,6 +169,14 @@ class Settlement(Base):
     trip = relationship("Trip", foreign_keys=[trip_id])
     payer = relationship("User", foreign_keys=[payer_id])
     payee = relationship("User", foreign_keys=[payee_id])
+
+    @property
+    def payer_name(self) -> str:
+        return self.payer.name if self.payer else "Unknown"
+
+    @property
+    def payee_name(self) -> str:
+        return self.payee.name if self.payee else "Unknown"
 
 
 class Notification(Base):

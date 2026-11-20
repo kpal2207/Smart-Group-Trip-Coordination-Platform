@@ -14,11 +14,21 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies.auth import get_current_user
+from app.models.trip import Trip, TripMember
 from app.models.user import User
 from app.schemas.trip import TripCreate, TripResponse, TripJoin, JoinResponse, MemberResponse
 from app.services.trip import create_trip, join_trip_by_code
 
 router = APIRouter(prefix="/trips", tags=["Trips"])
+
+
+def _build_join_response(trip: Trip, membership: TripMember) -> JoinResponse:
+    """Shared helper to build the JoinResponse from a trip and membership."""
+    return JoinResponse(
+        message="Successfully joined the trip.",
+        trip=TripResponse.model_validate(trip),
+        membership=MemberResponse.model_validate(membership),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -59,11 +69,7 @@ def join_trip(
     Rejects duplicate memberships (409) and invalid codes (404).
     """
     trip, membership = join_trip_by_code(db, payload.trip_code, current_user)
-    return JoinResponse(
-        message="Successfully joined the trip.",
-        trip=TripResponse.model_validate(trip),
-        membership=MemberResponse.model_validate(membership),
-    )
+    return _build_join_response(trip, membership)
 
 
 # ---------------------------------------------------------------------------
@@ -88,11 +94,7 @@ def join_trip_via_link(
     the user here after they click the shared link.
     """
     trip, membership = join_trip_by_code(db, trip_code, current_user)
-    return JoinResponse(
-        message="Successfully joined the trip.",
-        trip=TripResponse.model_validate(trip),
-        membership=MemberResponse.model_validate(membership),
-    )
+    return _build_join_response(trip, membership)
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +109,6 @@ def list_my_trips(
     """
     Return all trips the authenticated user belongs to (as host or member).
     """
-    from app.models.trip import Trip, TripMember
     trips = (
         db.query(Trip)
         .join(TripMember, TripMember.trip_id == Trip.id)
@@ -130,7 +131,6 @@ def get_trip(
     """
     Return details for a single trip the user is a member of.
     """
-    from app.models.trip import Trip, TripMember
     trip = (
         db.query(Trip)
         .join(TripMember, TripMember.trip_id == Trip.id)

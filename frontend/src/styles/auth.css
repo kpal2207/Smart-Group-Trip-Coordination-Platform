@@ -1,0 +1,491 @@
+/* ==========================================================================
+   Modern Split-Screen Auth Layout (Login, Signup, Reset Password)
+   ========================================================================== */
+
+.auth-split-wrapper {
+  display: flex;
+  min-height: 100vh;
+  width: 100vw;
+  background-color: #f8fafc;
+  overflow-x: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* ==========================================================================
+   Left Panel: Dark Coordinate & Live Telemetry Canvas
+   ========================================================================== */
+.auth-live-panel {
+  flex: 1.1;
+  background: radial-gradient(circle at 20% 30%, #0d1b3e 0%, #060b18 70%, #030712 100%);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 60px 48px;
+  overflow: hidden;
+  color: #ffffff;
+}
+
+/* Dotted Map / Coordinate Grid Background */
+.auth-grid-bg {
+  position: absolute;
+  inset: 0;
+  background-image: 
+    radial-gradient(rgba(56, 189, 248, 0.15) 1px, transparent 1px),
+    radial-gradient(rgba(99, 102, 241, 0.08) 1px, transparent 1px);
+  background-size: 32px 32px, 16px 16px;
+  background-position: 0 0, 16px 16px;
+  opacity: 0.75;
+  pointer-events: none;
+}
+
+/* Glowing Orbital Arcs & Route SVG */
+.auth-arcs-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* Live Floating Telemetry Badge */
+.auth-live-badge {
+  position: absolute;
+  top: 36px;
+  left: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  backdrop-filter: blur(12px);
+  padding: 8px 16px;
+  border-radius: 9999px;
+  font-size: 0.82rem;
+  letter-spacing: 0.05em;
+  color: #e2e8f0;
+  font-weight: 500;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  z-index: 2;
+}
+
+.live-pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #10b981;
+  box-shadow: 0 0 10px #10b981, 0 0 20px #10b981;
+  animation: pulse-glow 2s infinite ease-in-out;
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.3);
+    opacity: 0.7;
+  }
+}
+
+/* Central Pitch Content */
+.auth-pitch-content {
+  position: relative;
+  z-index: 2;
+  max-width: 500px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Abstract Interconnected Nodes Geometry Icon (NO Airplane, NO Brand) */
+.auth-geometric-icon {
+  width: 64px;
+  height: 64px;
+  margin-bottom: 24px;
+  filter: drop-shadow(0 0 18px rgba(56, 189, 248, 0.45));
+}
+
+.auth-pitch-title {
+  font-size: 2.75rem;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+  color: #ffffff;
+  margin-bottom: 16px;
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+.auth-pitch-desc {
+  font-size: 1.05rem;
+  line-height: 1.6;
+  color: #94a3b8;
+  margin-bottom: 36px;
+}
+
+/* Live Telemetry Card Preview */
+.auth-telemetry-pill-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+  width: 100%;
+}
+
+.telemetry-chip {
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(8px);
+  padding: 8px 14px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: #cbd5e1;
+}
+
+.telemetry-chip-val {
+  color: #38bdf8;
+  font-weight: 600;
+  font-family: monospace;
+}
+
+/* ==========================================================================
+   Right Panel: Clean Floating Auth Card
+   ========================================================================== */
+.auth-form-panel {
+  flex: 0.95;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+  background-color: #ffffff;
+  position: relative;
+}
+
+.auth-modern-card {
+  width: 100%;
+  max-width: 440px;
+  background: #ffffff;
+  border-radius: 24px;
+  padding: 44px 40px;
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.06);
+  border: 1px solid #f1f5f9;
+}
+
+.auth-header-block {
+  margin-bottom: 26px;
+}
+
+.auth-main-title {
+  font-size: 1.85rem;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+  margin-bottom: 6px;
+}
+
+.auth-sub-title {
+  font-size: 0.95rem;
+  color: #64748b;
+  margin: 0;
+}
+
+/* 1-Click Google OAuth Button */
+.auth-google-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 12px 18px;
+  background: #ffffff;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 12px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #1e293b;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.auth-google-btn:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  transform: translateY(-1px);
+}
+
+.auth-google-btn:active {
+  transform: translateY(0);
+}
+
+/* Modern Divider */
+.auth-or-divider {
+  display: flex;
+  align-items: center;
+  margin: 22px 0;
+  color: #94a3b8;
+  font-size: 0.85rem;
+}
+
+.auth-or-divider::before,
+.auth-or-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background-color: #e2e8f0;
+}
+
+.auth-or-divider span {
+  padding: 0 14px;
+}
+
+/* Form Groups & Inputs */
+.modern-form-group {
+  margin-bottom: 20px;
+}
+
+.modern-form-group label {
+  display: block;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #334155;
+  margin-bottom: 8px;
+}
+
+.input-icon-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-leading-icon {
+  position: absolute;
+  left: 14px;
+  color: #94a3b8;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+}
+
+.modern-auth-input {
+  width: 100%;
+  padding: 12px 14px 12px 42px;
+  font-size: 0.95rem;
+  color: #0f172a;
+  background-color: #ffffff;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 12px;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.modern-auth-input.has-trailing {
+  padding-right: 44px;
+}
+
+.modern-auth-input::placeholder {
+  color: #94a3b8;
+}
+
+.modern-auth-input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
+}
+
+.input-trailing-btn {
+  position: absolute;
+  right: 12px;
+  background: none;
+  border: none;
+  padding: 6px;
+  color: #94a3b8;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  border-radius: 6px;
+  transition: color 0.15s ease;
+}
+
+.input-trailing-btn:hover {
+  color: #475569;
+}
+
+/* Form Helper Row: Remember Me & Forgot Password */
+.auth-helper-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  font-size: 0.88rem;
+}
+
+/* Modern Toggle Switch for Remember Me */
+.remember-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+  color: #475569;
+  font-weight: 500;
+}
+
+.toggle-switch-track {
+  width: 38px;
+  height: 22px;
+  background-color: #cbd5e1;
+  border-radius: 9999px;
+  position: relative;
+  transition: background-color 0.25s ease;
+}
+
+.remember-toggle-input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.remember-toggle-input:checked + .toggle-switch-track {
+  background-color: #0f172a;
+}
+
+.toggle-switch-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  background-color: #ffffff;
+  border-radius: 50%;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.remember-toggle-input:checked + .toggle-switch-track .toggle-switch-thumb {
+  transform: translateX(16px);
+}
+
+.auth-forgot-link {
+  color: #475569;
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 0.15s ease;
+}
+
+.auth-forgot-link:hover {
+  color: #0f172a;
+  text-decoration: underline;
+}
+
+/* Primary Action Button (Sign In / Sign Up) */
+.auth-primary-submit-btn {
+  width: 100%;
+  padding: 13px 20px;
+  background-color: #0f172a;
+  color: #ffffff;
+  font-size: 0.98rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.18);
+}
+
+.auth-primary-submit-btn:hover:not(:disabled) {
+  background-color: #1e293b;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.24);
+}
+
+.auth-primary-submit-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.auth-primary-submit-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+/* Footer Link */
+.auth-bottom-switch {
+  text-align: center;
+  margin-top: 24px;
+  font-size: 0.9rem;
+  color: #64748b;
+}
+
+.auth-bottom-switch a {
+  color: #0f172a;
+  font-weight: 600;
+  text-decoration: none;
+  margin-left: 4px;
+}
+
+.auth-bottom-switch a:hover {
+  text-decoration: underline;
+}
+
+/* Inline Forgot Password Modal/Drawer */
+.forgot-password-box {
+  margin-top: 20px;
+  padding: 18px;
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+
+/* Alerts inside modern card */
+.auth-card-alert {
+  padding: 12px 14px;
+  border-radius: 10px;
+  margin-bottom: 18px;
+  font-size: 0.88rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.auth-card-alert-error {
+  background-color: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+}
+
+.auth-card-alert-success {
+  background-color: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #15803d;
+}
+
+/* ==========================================================================
+   Responsive Adaptations
+   ========================================================================== */
+@media (max-width: 960px) {
+  .auth-split-wrapper {
+    flex-direction: column;
+  }
+  .auth-live-panel {
+    display: none; /* Hide dark telemetry pitch on mobile, focus directly on form */
+  }
+  .auth-form-panel {
+    min-height: 100vh;
+    padding: 24px 16px;
+    background-color: #f8fafc;
+  }
+  .auth-modern-card {
+    padding: 32px 24px;
+  }
+}

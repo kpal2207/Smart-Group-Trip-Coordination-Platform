@@ -7,6 +7,8 @@
   --text-muted: #6c757d;
   --bg-color: #f8f9fa;
   --card-bg: #fff;
+  --bg-card: #fff;
+  --shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
   --error-color: #dc3545;
   --success-color: #28a745;
   --border-color: #dee2e6;
@@ -288,4 +290,20 @@ a:hover {
   .dashboard-grid {
     grid-template-columns: 1fr;
   }
+}
+
+
+/* Mobile/PWA ergonomics: preserve existing desktop styling while avoiding
+   viewport overflow and respecting notched-device safe areas. */
+html { min-width: 320px; }
+body { min-width: 320px; overflow-x: hidden; }
+button, .btn, input, select, textarea, a { touch-action: manipulation; }
+button, .btn { min-height: 48px; }
+input, select, textarea { max-width: 100%; }
+.app-layout { padding-bottom: env(safe-area-inset-bottom, 0px); }
+@media (max-width: 600px) {
+  .navbar { padding: 12px 14px; }
+  .navbar-container { flex-wrap: wrap; gap: 10px; }
+  .navbar-links { flex-wrap: wrap; gap: 8px; }
+  .btn { padding: 11px 16px; }
 }

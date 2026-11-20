@@ -36,6 +36,7 @@ def test_users(db):
             password_hash=hash_password("Password123!"),
         )
         db.add(u)
+        users.append(u)
     db.commit()
     for u in users:
         db.refresh(u)

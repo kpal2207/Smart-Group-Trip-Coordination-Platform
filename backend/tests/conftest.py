@@ -5,11 +5,29 @@ Uses an in-memory SQLite database so tests run fast without
 needing a real PostgreSQL instance.
 """
 
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+
+# Keep tests independent of developer credentials and a local .env file.
+os.environ.update(
+    {
+        "DATABASE_DIALECT": "sqlite",
+        "DATABASE_USER": "",
+        "DATABASE_PASSWORD": "",
+        "DATABASE_HOST": "",
+        "DATABASE_PORT": "0",
+        "DATABASE_NAME": ":memory:",
+        "SECRET_KEY": "test-only-secret-key",
+        "ALGORITHM": "HS256",
+        "ACCESS_TOKEN_EXPIRE_MINUTES": "30",
+        "FRONTEND_URL": "http://localhost:5173",
+    }
+)
 
 from app.database import Base, get_db
 from app.models.user import User  # noqa: F401

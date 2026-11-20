@@ -32,14 +32,8 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-    
-    # The response model will automatically filter out the password hash
-    return RegisterResponse(
-        id=new_user.id,
-        name=new_user.name,
-        email=new_user.email,
-        message="Registration successful"
-    )
+
+    return RegisterResponse.model_validate(new_user)
 
 @router.post("/login", response_model=Token)
 def login(user_data: UserLogin, db: Session = Depends(get_db)):
