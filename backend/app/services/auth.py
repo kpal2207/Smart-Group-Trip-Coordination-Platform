@@ -81,11 +81,5 @@ def decode_access_token(token: str) -> dict | None:
             except JWTError:
                 pass
 
-    # 3. Fallback: decode unverified claims with expiration check
-    try:
-        claims = jwt.get_unverified_claims(token)
-        if "exp" in claims and datetime.now(timezone.utc).timestamp() > claims["exp"]:
-            return None
-        return claims
-    except JWTError:
-        return None
+    return None
+

@@ -223,3 +223,7 @@ class TripLedgerDashboard(BaseModel):
     member_balances: list[MemberBalanceItem]
     settlements: list[SettlementResponse]
     members: list[TripMemberItem]
+
+
+class StatusResponse(BaseModel):
+    status: str

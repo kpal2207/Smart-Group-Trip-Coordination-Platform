@@ -21,7 +21,7 @@ from app.models.expense import Notification
 from app.schemas.expense import (
     ExpenseCreate, ExpenseResponse, DisputeCreate, DisputeResponse,
     DisputeReview, SettlementCreate, SettlementResponse,
-    TripMemberItem, TripLedgerDashboard, NotificationResponse
+    TripMemberItem, TripLedgerDashboard, NotificationResponse, StatusResponse
 )
 from app.services import expense as expense_service
 
@@ -165,7 +165,7 @@ def get_user_notifications(
     ).order_by(Notification.created_at.desc()).limit(50).all()
 
 
-@router.post("/notifications/{notification_id}/read")
+@router.post("/notifications/{notification_id}/read", response_model=StatusResponse)
 def mark_notification_read(
     notification_id: int,
     db: Session = Depends(get_db),
@@ -184,7 +184,7 @@ def mark_notification_read(
     return {"status": "ok"}
 
 
-@router.post("/notifications/read-all")
+@router.post("/notifications/read-all", response_model=StatusResponse)
 def mark_all_notifications_read(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -194,7 +194,7 @@ def mark_all_notifications_read(
     """
     db.query(Notification).filter(
         Notification.user_id == current_user.id,
-        Notification.is_read == False
+        Notification.is_read.is_(False)
     ).update({"is_read": True})
     db.commit()
     return {"status": "ok"}
