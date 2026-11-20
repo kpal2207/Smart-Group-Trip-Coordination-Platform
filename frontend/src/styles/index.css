@@ -7,6 +7,8 @@
   --text-muted: #6c757d;
   --bg-color: #f8f9fa;
   --card-bg: #fff;
+  --bg-card: #fff;
+  --shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
   --error-color: #dc3545;
   --success-color: #28a745;
   --border-color: #dee2e6;

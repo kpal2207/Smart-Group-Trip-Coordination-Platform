@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies.auth import get_current_user
+from app.models.convoy_telemetry import ConvoyTelemetry
 from app.models.trip import TripMember
 from app.models.user import User
 from app.schemas.telemetry import (
@@ -16,13 +17,6 @@ from app.schemas.telemetry import (
 )
 
 router = APIRouter(prefix="/trips", tags=["Telemetry"])
-
-
-def _telemetry_model():
-    """Import the DBA-owned model when a telemetry request is served."""
-    from app.models.convoy_telemetry import ConvoyTelemetry
-
-    return ConvoyTelemetry
 
 
 def _require_trip_member(db: Session, trip_id: int, user_id: int) -> None:
@@ -57,8 +51,7 @@ def submit_telemetry(
     response, including the submitting member's acknowledgement.
     """
     _require_trip_member(db, trip_id, current_user.id)
-    Telemetry = _telemetry_model()
-    ping = Telemetry(
+    ping = ConvoyTelemetry(
         trip_id=trip_id,
         user_id=current_user.id,
         latitude=payload.latitude,
@@ -102,24 +95,23 @@ def get_convoy_locations(
     and returns the explicit hidden status.
     """
     _require_trip_member(db, trip_id, current_user.id)
-    Telemetry = _telemetry_model()
 
     latest_ids = (
         db.query(
-            Telemetry.id.label("ping_id"),
-            Telemetry.user_id.label("user_id"),
+            ConvoyTelemetry.id.label("ping_id"),
+            ConvoyTelemetry.user_id.label("user_id"),
             func.row_number()
             .over(
-                partition_by=Telemetry.user_id,
-                order_by=(Telemetry.recorded_at.desc(), Telemetry.id.desc()),
+                partition_by=ConvoyTelemetry.user_id,
+                order_by=(ConvoyTelemetry.recorded_at.desc(), ConvoyTelemetry.id.desc()),
             )
             .label("position"),
         )
-        .filter(Telemetry.trip_id == trip_id)
+        .filter(ConvoyTelemetry.trip_id == trip_id)
         .subquery()
     )
     rows = (
-        db.query(TripMember, User, Telemetry)
+        db.query(TripMember, User, ConvoyTelemetry)
         .join(User, User.id == TripMember.user_id)
         .outerjoin(
             latest_ids,
@@ -128,7 +120,7 @@ def get_convoy_locations(
                 latest_ids.c.position == 1,
             ),
         )
-        .outerjoin(Telemetry, Telemetry.id == latest_ids.c.ping_id)
+        .outerjoin(ConvoyTelemetry, ConvoyTelemetry.id == latest_ids.c.ping_id)
         .filter(TripMember.trip_id == trip_id)
         .order_by(User.name.asc(), User.id.asc())
         .all()

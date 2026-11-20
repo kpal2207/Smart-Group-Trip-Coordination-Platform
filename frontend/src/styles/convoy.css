@@ -1,0 +1,319 @@
+/* ==========================================================================
+   Convoy Real-Time Telemetry & Radar Styles
+   ========================================================================== */
+
+.convoy-tracker-container {
+  background: #0f172a;
+  color: #f8fafc;
+  border-radius: 16px;
+  padding: 24px;
+  margin-top: 24px;
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  position: relative;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Header & Status Bar */
+.convoy-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 16px;
+}
+
+.convoy-title-group h2 {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 4px 0;
+}
+
+.convoy-sub {
+  font-size: 0.85rem;
+  color: #94a3b8;
+  margin: 0;
+}
+
+.convoy-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid #10b981;
+  color: #34d399;
+  padding: 6px 14px;
+  border-radius: 9999px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.convoy-status-pill.offline {
+  background: rgba(148, 163, 184, 0.15);
+  border-color: #64748b;
+  color: #cbd5e1;
+}
+
+.pulse-dot-green {
+  width: 8px;
+  height: 8px;
+  background-color: #10b981;
+  border-radius: 50%;
+  box-shadow: 0 0 10px #10b981;
+  animation: pulse-ring 2s infinite ease-in-out;
+}
+
+@keyframes pulse-ring {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.4);
+    opacity: 0.6;
+  }
+}
+
+/* Lag Warning Alert Banner */
+.convoy-lag-alert-banner {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1.5px solid #ef4444;
+  color: #fca5a5;
+  padding: 14px 18px;
+  border-radius: 12px;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  animation: alert-fade 2s infinite alternate;
+}
+
+@keyframes alert-fade {
+  from { box-shadow: 0 0 0 rgba(239, 68, 68, 0.2); }
+  to { box-shadow: 0 0 20px rgba(239, 68, 68, 0.4); }
+}
+
+.convoy-lag-alert-title {
+  font-weight: 700;
+  color: #fee2e2;
+  font-size: 0.95rem;
+}
+
+.convoy-lag-alert-desc {
+  font-size: 0.85rem;
+  color: #fca5a5;
+  margin-top: 2px;
+}
+
+/* Controls Grid */
+.convoy-controls-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.convoy-control-card {
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.convoy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 9px 16px;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s ease;
+}
+
+.convoy-btn-primary {
+  background: #0284c7;
+  color: #ffffff;
+}
+
+.convoy-btn-primary:hover {
+  background: #0369a1;
+}
+
+.convoy-btn-danger {
+  background: #dc2626;
+  color: #ffffff;
+}
+
+.convoy-btn-danger:hover {
+  background: #b91c1c;
+}
+
+.convoy-btn-secondary {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e2e8f0;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.convoy-btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* Radar & Telemetry Layout */
+.convoy-body-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 20px;
+}
+
+@media (max-width: 960px) {
+  .convoy-body-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Radar Canvas Container */
+.radar-display-panel {
+  background: radial-gradient(circle at center, #0f172a 0%, #030712 100%);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  border-radius: 14px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  min-height: 380px;
+}
+
+.radar-screen-svg {
+  width: 100%;
+  max-width: 340px;
+  height: 340px;
+  position: relative;
+}
+
+.radar-sweep-line {
+  transform-origin: 170px 170px;
+  animation: radar-sweep 4s linear infinite;
+}
+
+@keyframes radar-sweep {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.radar-legend {
+  display: flex;
+  gap: 16px;
+  margin-top: 14px;
+  font-size: 0.78rem;
+  color: #94a3b8;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+/* Convoy Roster & Telemetry Feed */
+.convoy-roster-panel {
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+}
+
+.convoy-roster-header {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #e2e8f0;
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.convoy-member-card {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  transition: border-color 0.2s ease;
+}
+
+.convoy-member-card.is-leader {
+  border-color: rgba(56, 189, 248, 0.5);
+  background: rgba(14, 165, 233, 0.08);
+}
+
+.convoy-member-card.is-lagging {
+  border-color: rgba(239, 68, 68, 0.6);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.member-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.member-name-tag {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.member-speed-badge {
+  font-size: 0.85rem;
+  font-family: monospace;
+  font-weight: 700;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.15);
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+.member-metrics-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 0.78rem;
+  color: #94a3b8;
+}
+
+.metric-highlight {
+  color: #f1f5f9;
+  font-weight: 500;
+}

@@ -1,0 +1,46 @@
+[
+  {
+    "user_id": 101,
+    "name": "Demo Driver A",
+    "latitude": 37.7749,
+    "longitude": -122.4194,
+    "speed_kmh": 24.5,
+    "heading": 180,
+    "is_ghost_mode": false,
+    "location_status": "fresh",
+    "recorded_at": "2026-12-01T12:01:50Z"
+  },
+  {
+    "user_id": 102,
+    "name": "Demo Driver B",
+    "latitude": 37.7721,
+    "longitude": -122.4172,
+    "speed_kmh": 18.0,
+    "heading": 175,
+    "is_ghost_mode": false,
+    "location_status": "stale",
+    "recorded_at": "2026-12-01T12:00:00Z"
+  },
+  {
+    "user_id": 103,
+    "name": "Demo Driver C",
+    "latitude": null,
+    "longitude": null,
+    "speed_kmh": 24.5,
+    "heading": 180,
+    "is_ghost_mode": true,
+    "location_status": "hidden",
+    "recorded_at": "2026-12-01T12:01:55Z"
+  },
+  {
+    "user_id": 104,
+    "name": "Demo Driver D",
+    "latitude": null,
+    "longitude": null,
+    "speed_kmh": null,
+    "heading": null,
+    "is_ghost_mode": false,
+    "location_status": "unavailable",
+    "recorded_at": null
+  }
+]

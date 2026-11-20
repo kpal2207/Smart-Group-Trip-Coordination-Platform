@@ -1,10 +1,12 @@
 import React from 'react';
 import { Routes, Route } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from './context/AuthContext';
 import Navbar from './components/Navbar';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
+import ResetPassword from './pages/ResetPassword';
 import Home from './pages/Home';
 import ProtectedRoute from './components/ProtectedRoute';
 import MyTrips from './pages/MyTrips';
@@ -16,70 +18,83 @@ import AddExpense from './pages/AddExpense';
 import './styles/trip.css';
 import './styles/expense.css';
 
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 60 * 2, // 2 minutes stale time
+      refetchOnWindowFocus: false,
+      retry: 1,
+    },
+  },
+});
+
 const App = () => {
   return (
-    <AuthProvider>
-      <div className="app-layout">
-        <Routes>
-          {/* Public Routes without Navbar */}
-          <Route path="/" element={<Landing />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <div className="app-layout">
+          <Routes>
+            {/* Public Routes without Navbar */}
+            <Route path="/" element={<Landing />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
 
-          {/* Protected Routes (include Navbar here or via a layout component) */}
-          <Route element={<ProtectedRoute />}>
-            <Route path="/home" element={
-              <>
-                <Navbar />
-                <Home />
-              </>
-            } />
-            <Route path="/trips" element={
-              <>
-                <Navbar />
-                <MyTrips />
-              </>
-            } />
-            <Route path="/trips/create" element={
-              <>
-                <Navbar />
-                <CreateTrip />
-              </>
-            } />
-            <Route path="/trips/join" element={
-              <>
-                <Navbar />
-                <JoinTrip />
-              </>
-            } />
-            <Route path="/trips/join/:tripCode" element={
-              <>
-                <Navbar />
-                <JoinTrip />
-              </>
-            } />
-            <Route path="/trips/:tripId" element={
-              <>
-                <Navbar />
-                <TripDetails />
-              </>
-            } />
-            <Route path="/trips/:tripId/expenses" element={
-              <>
-                <Navbar />
-                <ExpenseDashboard />
-              </>
-            } />
-            <Route path="/trips/:tripId/expenses/add" element={
-              <>
-                <Navbar />
-                <AddExpense />
-              </>
-            } />
-          </Route>
-        </Routes>
-      </div>
-    </AuthProvider>
+            {/* Protected Routes (include Navbar here or via a layout component) */}
+            <Route element={<ProtectedRoute />}>
+              <Route path="/home" element={
+                <>
+                  <Navbar />
+                  <Home />
+                </>
+              } />
+              <Route path="/trips" element={
+                <>
+                  <Navbar />
+                  <MyTrips />
+                </>
+              } />
+              <Route path="/trips/create" element={
+                <>
+                  <Navbar />
+                  <CreateTrip />
+                </>
+              } />
+              <Route path="/trips/join" element={
+                <>
+                  <Navbar />
+                  <JoinTrip />
+                </>
+              } />
+              <Route path="/trips/join/:tripCode" element={
+                <>
+                  <Navbar />
+                  <JoinTrip />
+                </>
+              } />
+              <Route path="/trips/:tripId" element={
+                <>
+                  <Navbar />
+                  <TripDetails />
+                </>
+              } />
+              <Route path="/trips/:tripId/expenses" element={
+                <>
+                  <Navbar />
+                  <ExpenseDashboard />
+                </>
+              } />
+              <Route path="/trips/:tripId/expenses/add" element={
+                <>
+                  <Navbar />
+                  <AddExpense />
+                </>
+              } />
+            </Route>
+          </Routes>
+        </div>
+      </AuthProvider>
+    </QueryClientProvider>
   );
 };
 
