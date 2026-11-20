@@ -7,9 +7,10 @@ import {
   DEFAULT_CONVOY_LAG_THRESHOLD_KM,
   calculateConvoyCentroid,
 } from '../utils/geolocation';
+import { generateConvoySimulationStep } from '../utils/convoySimulator';
 import '../styles/convoy.css';
 
-const ConvoyTracker = ({ tripId, tripTitle }) => {
+const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
   const { user } = useContext(AuthContext);
 
   // Convoy Members state: Map of user_id -> member location object
@@ -21,6 +22,8 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
   const [isBroadcasting, setIsBroadcasting] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
   const [ghostMode, setGhostMode] = useState(false);
+  const [simPhase, setSimPhase] = useState('auto'); // 'auto' | 'safe' | 'warning' | 'regroup'
+  const [simStep, setSimStep] = useState(0);
 
   // Local current location state
   const [myLocation, setMyLocation] = useState({
@@ -33,6 +36,18 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
   const channelRef = useRef(null);
   const simTimerRef = useRef(null);
   const geoWatchRef = useRef(null);
+  const simStepRef = useRef(0);
+  const simPhaseRef = useRef('auto');
+  const ghostModeRef = useRef(false);
+
+  // Synchronize refs with state for timer interval closures
+  useEffect(() => {
+    ghostModeRef.current = ghostMode;
+  }, [ghostMode]);
+
+  useEffect(() => {
+    simPhaseRef.current = simPhase;
+  }, [simPhase]);
 
   // 1. Initial Load: Fetch latest convoy locations from backend
   const fetchLocations = async () => {
@@ -181,7 +196,70 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
     }
   };
 
-  // 5. Start / Stop Simulated Convoy Drive (for testing without moving)
+  // 5. 4-Car Convoy Highway Simulation (Sprint 2 Issue #3)
+  const executeSimulationStep = (stepNumber, forcedPhaseVal) => {
+    const activePhase = forcedPhaseVal !== undefined
+      ? forcedPhaseVal
+      : (simPhaseRef.current === 'auto' ? null : simPhaseRef.current);
+
+    const stepResult = generateConvoySimulationStep(stepNumber, {
+      forcedPhase: activePhase,
+      ghostMode: ghostModeRef.current,
+    });
+
+    setMembers(stepResult.vehicles);
+    if (stepResult.leadVehicle && stepResult.leadVehicle.latitude != null) {
+      setMyLocation({
+        latitude: stepResult.leadVehicle.latitude,
+        longitude: stepResult.leadVehicle.longitude,
+        speed_kmh: stepResult.leadVehicle.speed_kmh,
+        heading: stepResult.leadVehicle.heading,
+      });
+    }
+
+    // Broadcast over Supabase Realtime if connected
+    if (channelRef.current && isConnected) {
+      stepResult.vehicles.forEach((veh) => {
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'telemetry_ping',
+          payload: {
+            user_id: veh.user_id,
+            name: veh.name,
+            latitude: veh.latitude,
+            longitude: veh.longitude,
+            speed_kmh: veh.speed_kmh,
+            heading: veh.heading,
+            is_ghost_mode: veh.is_ghost_mode,
+            is_simulated: true,
+          },
+        });
+      });
+    }
+
+    // Dispatch custom DOM event for Jay's Leaflet map integration
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('convoy:telemetry_update', {
+          detail: {
+            tripId,
+            vehicles: stepResult.vehicles,
+            leadVehicle: stepResult.leadVehicle,
+            laggingVehicles: stepResult.laggingVehicles,
+            stepIndex: stepResult.stepIndex,
+          },
+        })
+      );
+    }
+
+    // Direct callback prop support for Jay's Leaflet map component
+    if (typeof onTelemetryUpdate === 'function') {
+      onTelemetryUpdate(stepResult.vehicles);
+    }
+
+    return stepResult;
+  };
+
   const toggleSimulation = () => {
     if (isSimulating) {
       stopSimulation();
@@ -189,30 +267,38 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
       if (isBroadcasting) toggleDeviceGPS();
 
       setIsSimulating(true);
-      let step = 0;
+      simStepRef.current = 0;
+      setSimStep(0);
+
+      // Execute step 0 immediately
+      executeSimulationStep(0);
+
       simTimerRef.current = setInterval(() => {
-        step += 1;
-        const currentSpeed = Math.floor(65 + Math.sin(step / 3) * 15);
-        const latOffset = (step * 0.0012);
-        const lngOffset = (step * 0.0009);
-
-        const pingData = {
-          latitude: Number((15.2993 + latOffset).toFixed(6)),
-          longitude: Number((74.1240 + lngOffset).toFixed(6)),
-          speed_kmh: currentSpeed,
-          heading: Math.floor((45 + (step * 5)) % 360),
-          is_ghost_mode: ghostMode,
-        };
-
-        setMyLocation(pingData);
-        emitTelemetryPing(pingData);
+        simStepRef.current += 1;
+        setSimStep(simStepRef.current);
+        executeSimulationStep(simStepRef.current);
       }, 3000);
     }
   };
 
   const stopSimulation = () => {
-    if (simTimerRef.current) clearInterval(simTimerRef.current);
+    if (simTimerRef.current) {
+      clearInterval(simTimerRef.current);
+      simTimerRef.current = null;
+    }
     setIsSimulating(false);
+    setSimPhase('auto');
+    simPhaseRef.current = 'auto';
+    // Restore real trip convoy locations
+    fetchLocations();
+  };
+
+  const handlePhaseChange = (phase) => {
+    setSimPhase(phase);
+    simPhaseRef.current = phase;
+    if (isSimulating) {
+      executeSimulationStep(simStepRef.current, phase === 'auto' ? null : phase);
+    }
   };
 
   // 6. Centroid & Lag Calculations across visible vehicles
@@ -223,9 +309,12 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
       return { leader: null, validVehicles: [], laggingMembers: [], centroid: null };
     }
 
-    // Lead vehicle is the one with highest speed or foremost coordinate
+    // Lead vehicle is designated (sim-car-1 / is_lead) or the one with highest speed
+    const designatedLead = valid.find(
+      (m) => m.is_lead || m.user_id === 'sim-car-1' || m.name?.includes('Lead')
+    );
     const sorted = [...valid].sort((a, b) => (b.speed_kmh || 0) - (a.speed_kmh || 0));
-    const lead = sorted[0];
+    const lead = designatedLead || sorted[0];
 
     // Compute lag for each vehicle relative to the leader
     const lagging = [];
@@ -277,7 +366,7 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
 
       {/* Convoy Lag Alert Banner (Appears if someone falls > 2.0 km behind) */}
       {laggingMembers.length > 0 && (
-        <div className="convoy-lag-alert-banner">
+        <div className="convoy-lag-alert-banner" data-testid="convoy-lag-alert-banner">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5">
             <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
             <line x1="12" y1="9" x2="12" y2="13" />
@@ -316,7 +405,9 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
         <div className="convoy-control-card">
           <div>
             <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>Highway Simulation</div>
-            <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Test multi-vehicle motion</div>
+            <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+              {isSimulating ? `Active (Step ${(simStep % 30) + 1}/30)` : '4-Vehicle NH66 Drive'}
+            </div>
           </div>
           <button
             type="button"
@@ -340,7 +431,10 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
               onChange={(e) => {
                 const next = e.target.checked;
                 setGhostMode(next);
-                if (isBroadcasting || isSimulating) {
+                ghostModeRef.current = next;
+                if (isSimulating) {
+                  executeSimulationStep(simStepRef.current);
+                } else if (isBroadcasting) {
                   emitTelemetryPing({ ...myLocation, is_ghost_mode: next });
                 }
               }}
@@ -349,6 +443,46 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
           </label>
         </div>
       </div>
+
+      {/* Simulation Scenario Controller Bar */}
+      {isSimulating && (
+        <div className="convoy-sim-scenario-bar" data-testid="sim-scenario-bar">
+          <div className="convoy-sim-scenario-info">
+            <span className="sim-badge">4-CAR SIMULATOR</span>
+            <span className="sim-route-text">Route: NH66 Goa • Step {(simStep % 30) + 1} of 30</span>
+          </div>
+          <div className="convoy-sim-scenario-buttons">
+            <button
+              type="button"
+              className={`sim-phase-btn ${simPhase === 'auto' ? 'active' : ''}`}
+              onClick={() => handlePhaseChange('auto')}
+            >
+              Auto Highway Loop
+            </button>
+            <button
+              type="button"
+              className={`sim-phase-btn ${simPhase === 'safe' ? 'active' : ''}`}
+              onClick={() => handlePhaseChange('safe')}
+            >
+              Safe Pack (&lt;0.6 km)
+            </button>
+            <button
+              type="button"
+              className={`sim-phase-btn ${simPhase === 'warning' ? 'active' : ''}`}
+              onClick={() => handlePhaseChange('warning')}
+            >
+              Trigger Lag (&gt;2.0 km)
+            </button>
+            <button
+              type="button"
+              className={`sim-phase-btn ${simPhase === 'regroup' ? 'active' : ''}`}
+              onClick={() => handlePhaseChange('regroup')}
+            >
+              Regroup (&lt;1.5 km)
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Body: Radar Display + Convoy Member Roster */}
       <div className="convoy-body-grid">
@@ -413,7 +547,7 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
                     fontWeight="700"
                     filter="drop-shadow(0 1px 2px rgba(0,0,0,0.8))"
                   >
-                    {veh.name?.split(' ')[0]} {isLead ? '★' : ''}
+                    {isLead ? 'Lead ★' : (veh.name || `Car ${idx + 1}`)}
                   </text>
                 </g>
               );
@@ -469,7 +603,7 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
                             width: '8px',
                             height: '8px',
                             borderRadius: '50%',
-                            background: isOnline ? '#10b981' : '#64748b',
+                            background: isOnline || isSimulating ? '#10b981' : '#64748b',
                             display: 'inline-block',
                           }}
                         />
