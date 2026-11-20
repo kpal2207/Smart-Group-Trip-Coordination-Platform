@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App.jsx';
 import './styles/index.css';
+import { registerServiceWorker } from './utils/registerServiceWorker';
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -40,3 +41,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     </ErrorBoundary>
   </React.StrictMode>
 );
+
+// Do not delay React startup; register the PWA worker only in production builds.
+if (typeof window !== 'undefined') {
+  registerServiceWorker();
+}

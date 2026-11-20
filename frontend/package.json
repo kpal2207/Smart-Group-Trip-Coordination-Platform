@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node scripts/generate-sw-precache.mjs",
     "preview": "vite preview",
-    "test": "node --test src/utils/geolocation.test.js"
+    "test": "node --test src/utils/geolocation.test.js scripts/pwa-offline.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.119.0",
