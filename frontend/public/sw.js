@@ -1,22 +1,60 @@
-/* ConvoySync service worker. Authenticated API/GPS data is never cached. */
-const CACHE_NAME = 'convoysync-static-v1';
-const APP_SHELL = ['/'];
-const STATIC_ASSET = /\.(?:css|js|mjs|png|jpg|jpeg|svg|webp|ico|woff2?)$/i;
-const PRIVATE_OR_API_PATH = /^\/(?:api|auth|trips|notifications|expenses|disputes)(?:\/|$)/i;
+/* ConvoySync service worker.
+ * Only the app shell and build-generated static assets are cached. API, auth,
+ * trip and telemetry responses are deliberately never written to Cache Storage.
+ */
+const CACHE_NAME = 'convoysync-static-v2';
+const OFFLINE_PAGE = '/offline.html';
+// Replaced during `npm run build` with URLs for every emitted Vite asset.
+const PRECACHE_URLS = /*__PRECACHE_URLS__*/ [];
+
+const PRIVATE_API_PATHS = [
+  /^\/api(?:\/|$)/i,
+  /^\/auth(?:\/|$)/i,
+  /^\/trips(?:\/|$)/i,
+  /^\/notifications(?:\/|$)/i,
+  /^\/expenses(?:\/|$)/i,
+  /^\/disputes(?:\/|$)/i,
+  /^\/telemetry(?:\/|$)/i,
+  /^\/convoy\/locations(?:\/|$)/i,
+];
+
+function isPrivateApiPath(pathname) {
+  return PRIVATE_API_PATHS.some((pattern) => pattern.test(pathname));
+}
+
+function hasAuthorizationHeader(request) {
+  return Boolean(
+    request.headers &&
+    typeof request.headers.has === 'function' &&
+    request.headers.has('Authorization')
+  );
+}
+
+function offlineResponse() {
+  return new Response(
+    'ConvoySync is offline. Reconnect to access saved trips, login and live convoy information.',
+    {
+      status: 503,
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+    }
+  );
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE_NAME);
-    await cache.addAll(APP_SHELL);
+    // Install does not complete until the HTML, offline fallback, icons,
+    // manifest, and every hashed JS/CSS/media asset from the Vite build exist.
+    await cache.addAll(PRECACHE_URLS);
     await self.skipWaiting();
   })());
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
-    const names = await caches.keys();
+    const cacheNames = await caches.keys();
     await Promise.all(
-      names
+      cacheNames
         .filter((name) => name.startsWith('convoysync-static-') && name !== CACHE_NAME)
         .map((name) => caches.delete(name))
     );
@@ -30,37 +68,52 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
-  if (PRIVATE_OR_API_PATH.test(url.pathname) || request.headers.has('Authorization')) return;
 
+  // Handle document navigations BEFORE API-path exclusions. A saved /trips/...
+  // URL is a page navigation; if it cannot reach the server, return our offline
+  // page. No navigation response is dynamically cached, so personalized HTML
+  // can never be persisted accidentally.
   if (request.mode === 'navigate') {
     event.respondWith((async () => {
       try {
-        const response = await fetch(request);
-        if (response.ok) {
-          const cache = await caches.open(CACHE_NAME);
-          await cache.put('/', response.clone());
-        }
-        return response;
+        return await fetch(request);
       } catch {
-        const cachedShell = await caches.match('/');
-        return cachedShell || new Response(
-          'ConvoySync is offline. Reconnect to access login, trips and live convoy information.',
-          { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } }
-        );
+        const cache = await caches.open(CACHE_NAME);
+        if (/^\/trips(?:\/|$)/i.test(url.pathname)) {
+          return (await cache.match(OFFLINE_PAGE)) || offlineResponse();
+        }
+        // Root/app-shell navigations use the fully precached Vite index and
+        // its bundled JS/CSS. Other failed navigations can show offline.html.
+        return (await cache.match('/')) ||
+          (await cache.match(OFFLINE_PAGE)) ||
+          offlineResponse();
       }
     })());
     return;
   }
 
-  if (!STATIC_ASSET.test(url.pathname)) return;
+  // For non-navigation requests, reject all API/private paths and requests
+  // carrying bearer authorization before considering any cache strategy.
+  if (isPrivateApiPath(url.pathname) || hasAuthorizationHeader(request)) return;
+
+  // Runtime caching is intentionally limited to known static asset locations.
+  // The production build precaches these assets; this cache-first branch only
+  // serves those known files and never stores arbitrary GET responses.
+  const isStaticAsset =
+    url.pathname.startsWith('/assets/') ||
+    url.pathname.startsWith('/icons/') ||
+    url.pathname === '/manifest.json' ||
+    url.pathname === '/favicon.ico';
+  if (!isStaticAsset) return;
+
   event.respondWith((async () => {
-    const cached = await caches.match(request);
+    const cache = await caches.open(CACHE_NAME);
+    // Script/style requests often have different Sec-Fetch-Dest headers from
+    // the install-time precache requests. Ignore Vary so the exact same
+    // same-origin hashed build asset remains available offline. Ignore search
+    // as well so harmless cache-busting query parameters do not cause misses.
+    const cached = await cache.match(url.href, { ignoreSearch: true, ignoreVary: true });
     if (cached) return cached;
-    const response = await fetch(request);
-    if (response.ok && response.type === 'basic') {
-      const cache = await caches.open(CACHE_NAME);
-      await cache.put(request, response.clone());
-    }
-    return response;
+    return fetch(request);
   })());
 });
