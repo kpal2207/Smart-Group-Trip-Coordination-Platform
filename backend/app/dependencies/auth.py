@@ -31,11 +31,7 @@ def get_current_user(
     )
 
     if token is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise credentials_exception
 
     # Decode token to get payload
     payload = decode_access_token(token.credentials)
@@ -49,7 +45,7 @@ def get_current_user(
         metadata = payload.get("user_metadata", {})
         email = metadata.get("email") or email
 
-    if not email:
+    if not email or "@" not in email:
         raise credentials_exception
 
     # Look up user in DB
