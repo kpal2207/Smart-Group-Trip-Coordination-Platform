@@ -2,8 +2,9 @@
 
 Run from the backend directory:
     python -m scripts.seed_convoy_data
-    python -m scripts.seed_convoy_data --reset
     python -m scripts.seed_convoy_data --db-url sqlite:///./dev.db
+    python -m scripts.seed_convoy_data --allow-remote
+    python -m scripts.seed_convoy_data --reset --allow-remote --confirm-trip-code GOASP2DM
 
 The script creates/updates four application users, one demo trip, their four
 memberships, and five identifiable demo telemetry pings. It does NOT create Supabase Auth
@@ -11,7 +12,11 @@ identities. Users are application records associated by email when an
 authenticated Supabase user reaches the backend.
 
 Normal reruns preserve existing telemetry and add only missing demo pings.
-Use --reset to explicitly clear and recreate telemetry for the demo trip.
+Use --reset to clear ALL telemetry for the demo trip, including manual GPS pings.
+
+Safety: SQLite is allowed locally. Remote PostgreSQL requires --allow-remote
+and must identify the designated Supabase project. Reset additionally requires
+--confirm-trip-code GOASP2DM.
 """
 
 from __future__ import annotations
@@ -153,6 +158,57 @@ def _safe_database_label(target_url) -> str:
         return "<configured database>"
 
 
+
+# Project reference supplied for the designated Supabase database.
+SUPABASE_PROJECT_REF = "tdkvmhnqfeyewbwuwdvg"
+
+
+def _validate_seed_target(target_url: str, allow_remote: bool = False) -> None:
+    """Allow local SQLite by default; gate remote writes to the designated project."""
+    parsed = make_url(str(target_url))
+    driver = parsed.drivername.lower()
+
+    if driver.startswith("sqlite"):
+        return
+
+    if not (driver.startswith("postgresql") or driver.startswith("postgres")):
+        raise RuntimeError("Seeding blocked: only SQLite and the designated Supabase PostgreSQL target are supported.")
+
+    if not allow_remote:
+        raise RuntimeError(
+            "Remote database writes are disabled by default. "
+            "Pass --allow-remote to authorize the designated Supabase project."
+        )
+
+    host = (parsed.host or "").lower().rstrip(".")
+    username = parsed.username or ""
+
+    # Supabase direct connections encode the project in the hostname.
+    direct_project_match = (
+        host == f"db.{SUPABASE_PROJECT_REF}.supabase.co"
+        and username == "postgres"
+    )
+    # Supabase pooler hosts are shared; the project is encoded in the username.
+    pooler_project_match = (
+        host == "aws-1-ap-southeast-1.pooler.supabase.com"
+        and username == f"postgres.{SUPABASE_PROJECT_REF}"
+    )
+
+    if not (direct_project_match or pooler_project_match):
+        raise RuntimeError(
+            "Remote database target rejected: it does not match the designated "
+            "Supabase project. Verify the project reference and connection username."
+        )
+
+
+def _validate_reset_confirmation(reset: bool, confirm_trip_code: str | None) -> None:
+    """Require an exact trip-code confirmation before any reset work."""
+    if reset and confirm_trip_code != TRIP_CODE:
+        raise RuntimeError(
+            f"Reset blocked: pass --confirm-trip-code {TRIP_CODE} to confirm."
+        )
+
+
 def _load_app_components(db_url: str | None):
     """Load app models, preparing settings first for explicit SQLite use."""
     if db_url:
@@ -203,14 +259,27 @@ def _seed_ping_query(db, telemetry_model, trip_id, user_id,
     return query
 
 
-def seed(db_url: str | None = None, reset: bool = False) -> dict:
-    """Seed demo records without deleting rehearsal telemetry."""
+def seed(
+    db_url: str | None = None,
+    reset: bool = False,
+    allow_remote: bool = False,
+    confirm_trip_code: str | None = None,
+) -> dict:
+    """Seed the four demo users and GOASP2DM trip with guarded remote access."""
     started_at = time.perf_counter()
+
+    # Validate explicit arguments/targets before importing app components or creating an engine.
+    _validate_reset_confirmation(reset, confirm_trip_code)
+    if db_url is not None:
+        _validate_seed_target(db_url, allow_remote=allow_remote)
 
     Base, SQL_DATABASE_URL, User, Trip, TripMember, MemberRole, ConvoyTelemetry = (
         _load_app_components(db_url)
     )
     target_url = db_url if db_url else SQL_DATABASE_URL
+    # Also validate the application's configured URL before creating a
+    # connection, running SQLite bootstrap, or performing any database writes.
+    _validate_seed_target(str(target_url), allow_remote=allow_remote)
     is_sqlite = make_url(str(target_url)).drivername.startswith("sqlite")
     connect_args = {"check_same_thread": False} if is_sqlite else {}
     engine = create_engine(target_url, connect_args=connect_args)
@@ -242,10 +311,7 @@ def seed(db_url: str | None = None, reset: bool = False) -> dict:
                 print(f" {user.name} → {role.value} (membership id={membership.id})")
 
             if reset:
-                print(
-                    f"\nWARNING: Reset will delete ALL telemetry for demo trip "
-                    f"{TRIP_CODE}, including manually recorded GPS pings from other members."
-                )
+                print("\nReset requested: clearing ALL telemetry for GOASP2DM, including manually recorded GPS pings, then recreating the five demo seed pings...")
             else:
                 print("\nEnsuring demo telemetry (existing GPS history is preserved)...")
 
@@ -289,10 +355,10 @@ def seed(db_url: str | None = None, reset: bool = False) -> dict:
                     preserved_pings += 1
                     action = "preserved"
 
-                status = "🔒 GHOST" if ghost else (
-                    "🟢 fresh" if minutes_ago <= 1 else f"⏳ {minutes_ago}m ago"
+                status = "GHOST" if ghost else (
+                    "fresh" if minutes_ago <= 1 else f"{minutes_ago}m ago"
                 )
-                print(f"   ✅ {users[user_index].name}: {lat}, {lon} — {status} ({action})")
+                print(f"   {users[user_index].name}: {lat}, {lon} — {status} ({action})")
 
             db.flush()
 
@@ -369,7 +435,7 @@ def seed(db_url: str | None = None, reset: bool = False) -> dict:
             print(f"  Preserved:         {preserved_pings}")
             print(f"  Runtime:           {elapsed:.2f}s (target: under 5s)")
             print("=" * 58)
-            print("\nAll database assertions passed.")
+            print("All database assertions passed.")
             print("Runtime is under 5 seconds." if elapsed < 5
                   else "Runtime exceeded 5 seconds.")
 
@@ -402,22 +468,37 @@ def main() -> int:
         type=str,
         default=None,
         help=(
-            "Optional SQLAlchemy database URL override. "
-            "Without this option, the application's configured database is used."
+            "Optional SQLAlchemy database URL override. Without it, the application's configured database is used."
         ),
     )
     parser.add_argument(
         "--reset",
         action="store_true",
         help=(
-            "Explicitly clear and recreate telemetry for GOASP2DM. "
-            "Users, the trip, and extra members are preserved."
+            "DANGEROUS: clear ALL telemetry for GOASP2DM, including manual GPS pings. "
+            "Requires --confirm-trip-code GOASP2DM. Users, trip, and memberships are preserved."
         ),
+    )
+    parser.add_argument(
+        "--allow-remote",
+        action="store_true",
+        help="Explicitly authorize writes to the designated Supabase project.",
+    )
+    parser.add_argument(
+        "--confirm-trip-code",
+        type=str,
+        default=None,
+        help=f"Required with --reset; must exactly match {TRIP_CODE}.",
     )
     args = parser.parse_args()
 
     try:
-        seed(db_url=args.db_url, reset=args.reset)
+        seed(
+            db_url=args.db_url,
+            reset=args.reset,
+            allow_remote=args.allow_remote,
+            confirm_trip_code=args.confirm_trip_code,
+        )
         return 0
     except Exception as exc:
         print(f"\nSeed failed: {exc}", file=sys.stderr)
