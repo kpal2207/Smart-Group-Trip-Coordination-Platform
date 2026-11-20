@@ -242,7 +242,10 @@ def seed(db_url: str | None = None, reset: bool = False) -> dict:
                 print(f" {user.name} → {role.value} (membership id={membership.id})")
 
             if reset:
-                print("\nReset requested: refreshing only the five demo seed pings...")
+                print(
+                    f"\nWARNING: Reset will delete ALL telemetry for demo trip "
+                    f"{TRIP_CODE}, including manually recorded GPS pings from other members."
+                )
             else:
                 print("\nEnsuring demo telemetry (existing GPS history is preserved)...")
 
