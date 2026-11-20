@@ -228,23 +228,23 @@ def seed(db_url: str | None = None, reset: bool = False) -> dict:
             users = [_get_or_create_user(db, user_data) for user_data in SEED_USERS]
             db.flush()
             for user in users:
-                print(f"   ✅ {user.name} ({user.email}, id={user.id})")
+                print(f" {user.name} ({user.email}, id={user.id})")
 
-            print("\n🗺️  Seeding demo trip...")
+            print("\n Seeding demo trip...")
             trip = _get_or_create_trip(db, SEED_TRIP, host_id=users[0].id)
             db.flush()
-            print(f"   ✅ {trip.title} (code={trip.trip_code})")
+            print(f"{trip.title} (code={trip.trip_code})")
 
-            print("\n🤝 Ensuring demo memberships...")
+            print("\nEnsuring demo memberships...")
             for user, role_name in zip(users, MEMBER_ROLE_NAMES):
                 role = getattr(MemberRole, role_name)
                 membership = _ensure_membership(db, trip.id, user.id, role)
-                print(f"   ✅ {user.name} → {role.value} (membership id={membership.id})")
+                print(f" {user.name} → {role.value} (membership id={membership.id})")
 
             if reset:
-                print("\n♻️  Reset requested: refreshing only the five demo seed pings...")
+                print("\nReset requested: refreshing only the five demo seed pings...")
             else:
-                print("\n📡 Ensuring demo telemetry (existing GPS history is preserved)...")
+                print("\nEnsuring demo telemetry (existing GPS history is preserved)...")
 
             if reset:
                 # Explicit reset replaces telemetry for this dedicated demo trip.
@@ -366,9 +366,9 @@ def seed(db_url: str | None = None, reset: bool = False) -> dict:
             print(f"  Preserved:         {preserved_pings}")
             print(f"  Runtime:           {elapsed:.2f}s (target: under 5s)")
             print("=" * 58)
-            print("\n✅ All database assertions passed.")
-            print("✅ Runtime is under 5 seconds." if elapsed < 5
-                  else "⚠️ Runtime exceeded 5 seconds.")
+            print("\nAll database assertions passed.")
+            print("Runtime is under 5 seconds." if elapsed < 5
+                  else "Runtime exceeded 5 seconds.")
 
             return {
                 "users": user_count,
@@ -417,7 +417,7 @@ def main() -> int:
         seed(db_url=args.db_url, reset=args.reset)
         return 0
     except Exception as exc:
-        print(f"\n❌ Seed failed: {exc}", file=sys.stderr)
+        print(f"\nSeed failed: {exc}", file=sys.stderr)
         return 1
 
 
