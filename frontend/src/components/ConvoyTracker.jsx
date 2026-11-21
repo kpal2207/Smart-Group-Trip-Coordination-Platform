@@ -10,7 +10,14 @@ import {
   buildBroadcastTelemetryPayload,
   getValidConvoyVehicles,
 } from '../utils/geolocation';
-import { generateConvoySimulationStep } from '../utils/convoySimulator';
+import {
+  generateConvoySimulationStep,
+  filterTeardownMembers,
+  processFetchedConvoyLocations,
+  broadcastConvoySimulation,
+  getEffectiveGpsTelemetry,
+  SIMULATED_CAR_IDS,
+} from '../utils/convoySimulator';
 import '../styles/convoy.css';
 
 // Helper to render accessible status pill for convoy member cards
@@ -65,6 +72,10 @@ const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
   const simStepRef = useRef(0);
   const simPhaseRef = useRef('auto');
   const ghostModeRef = useRef(ghostMode);
+  const isConnectedRef = useRef(false);
+  const isSimulatingRef = useRef(false);
+  const hasRealGpsFixRef = useRef(false);
+  const realGpsLocationRef = useRef(null);
 
   // Synchronize refs with state for timer interval closures
   useEffect(() => {
@@ -79,7 +90,8 @@ const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
   const fetchLocations = async () => {
     try {
       const res = await getConvoyLocations(tripId);
-      setMembers(res.data || []);
+      // Guard against late network response overwriting active simulation
+      setMembers((prev) => processFetchedConvoyLocations(prev, res.data, isSimulatingRef.current));
     } catch (err) {
       console.warn('Failed to fetch initial convoy locations:', err);
     }
@@ -101,9 +113,10 @@ const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
 
     channelRef.current = channel;
 
-    // A. Listen for sub-second broadcast location pings from other vehicles
+    // A. Listen for sub-second broadcast location pings from REAL vehicles
     channel.on('broadcast', { event: 'telemetry_ping' }, ({ payload }) => {
-      if (!payload || !payload.user_id) return;
+      // Discard invalid or fake/simulated telemetry from real telemetry stream
+      if (!payload || !payload.user_id || payload.is_simulated) return;
 
       setMembers((prev) => {
         const existingIdx = prev.findIndex((m) => m.user_id === payload.user_id);
@@ -116,6 +129,7 @@ const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
           heading: payload.heading || null,
           is_ghost_mode: Boolean(payload.is_ghost_mode),
           location_status: payload.is_ghost_mode ? 'hidden' : 'fresh',
+          is_simulated: false,
           recorded_at: new Date().toISOString(),
         };
 
@@ -129,17 +143,53 @@ const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
       });
     });
 
-    // B. Listen for presence sync (who is currently connected to this convoy)
+    // B. Listen for distinct simulation pings from demo runs
+    channel.on('broadcast', { event: 'simulation_ping' }, ({ payload }) => {
+      if (!payload || !payload.user_id) return;
+
+      setMembers((prev) => {
+        const existingIdx = prev.findIndex((m) => m.user_id === payload.user_id);
+        const updatedItem = {
+          user_id: payload.user_id,
+          name: payload.name || 'Simulated Vehicle',
+          latitude: payload.is_ghost_mode ? null : payload.latitude,
+          longitude: payload.is_ghost_mode ? null : payload.longitude,
+          speed_kmh: payload.speed_kmh || 0,
+          heading: payload.heading || null,
+          is_ghost_mode: Boolean(payload.is_ghost_mode),
+          location_status: payload.is_ghost_mode ? 'hidden' : 'fresh',
+          is_simulated: true,
+          recorded_at: payload.recorded_at || new Date().toISOString(),
+        };
+
+        if (existingIdx >= 0) {
+          const next = [...prev];
+          next[existingIdx] = { ...next[existingIdx], ...updatedItem };
+          return next;
+        } else {
+          return [...prev, updatedItem];
+        }
+      });
+    });
+
+    // C. Listen for simulation teardown to purge specific synthetic vehicles across connected clients
+    channel.on('broadcast', { event: 'simulation_teardown' }, ({ payload }) => {
+      const simIds = payload?.simulated_ids || SIMULATED_CAR_IDS;
+      setMembers((prev) => filterTeardownMembers(prev, simIds));
+    });
+
+    // C. Listen for presence sync (who is currently connected to this convoy)
     channel.on('presence', { event: 'sync' }, () => {
       const presenceState = channel.presenceState();
       const onlineIds = new Set(Object.keys(presenceState).map(Number));
       setOnlinePresences(onlineIds);
     });
 
-    // C. Subscribe to the channel and track presence
+    // D. Subscribe to the channel and track presence
     channel.subscribe((status) => {
       if (status === 'SUBSCRIBED') {
         setIsConnected(true);
+        isConnectedRef.current = true;
         if (user?.id) {
           channel.track({
             user_id: user.id,
@@ -149,10 +199,12 @@ const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
         }
       } else {
         setIsConnected(false);
+        isConnectedRef.current = false;
       }
     });
 
     return () => {
+      isConnectedRef.current = false;
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
       }
@@ -167,7 +219,7 @@ const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
   const emitTelemetryPing = async (pingData) => {
     // A. Send sub-second Realtime broadcast to all convoy members
     // CRITICAL PRIVACY: Mask coordinates to null if Ghost Mode is active so raw GPS is never transmitted over WebSocket!
-    if (channelRef.current && isConnected) {
+    if (channelRef.current && isConnectedRef.current) {
       const broadcastPayload = buildBroadcastTelemetryPayload(user, pingData);
       channelRef.current.send({
         type: 'broadcast',
@@ -191,6 +243,8 @@ const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
         navigator.geolocation.clearWatch(geoWatchRef.current);
       }
       setIsBroadcasting(false);
+      hasRealGpsFixRef.current = false;
+      realGpsLocationRef.current = null;
     } else {
       if (!navigator.geolocation) {
         alert('Geolocation is not supported by your browser.');
@@ -209,12 +263,16 @@ const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
             heading: pos.coords.heading ? Number(pos.coords.heading.toFixed(1)) : 90.0,
             is_ghost_mode: currentGhost,
           };
+          hasRealGpsFixRef.current = true;
+          realGpsLocationRef.current = pingData;
           setMyLocation(pingData);
           emitTelemetryPing(pingData);
         },
         (err) => {
           console.error('GPS Watch error:', err);
           setIsBroadcasting(false);
+          hasRealGpsFixRef.current = false;
+          realGpsLocationRef.current = null;
         },
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
@@ -242,25 +300,8 @@ const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
       });
     }
 
-    // Broadcast over Supabase Realtime if connected
-    if (channelRef.current && isConnected) {
-      stepResult.vehicles.forEach((veh) => {
-        channelRef.current.send({
-          type: 'broadcast',
-          event: 'telemetry_ping',
-          payload: {
-            user_id: veh.user_id,
-            name: veh.name,
-            latitude: veh.latitude,
-            longitude: veh.longitude,
-            speed_kmh: veh.speed_kmh,
-            heading: veh.heading,
-            is_ghost_mode: veh.is_ghost_mode,
-            is_simulated: true,
-          },
-        });
-      });
-    }
+    // Broadcast over Supabase Realtime via distinct simulation event
+    broadcastConvoySimulation(channelRef.current, stepResult, isConnectedRef.current);
 
     // Dispatch custom DOM event for Jay's Leaflet map integration
     if (typeof window !== 'undefined') {
@@ -271,7 +312,11 @@ const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
             vehicles: stepResult.vehicles,
             leadVehicle: stepResult.leadVehicle,
             laggingVehicles: stepResult.laggingVehicles,
-            stepIndex: stepResult.stepIndex,
+            step: stepResult.step,
+            stepIndex: stepResult.step,
+            phaseName: stepResult.phaseName,
+            isWarningActive: stepResult.isWarningActive,
+            car4LagKm: stepResult.car4LagKm,
           },
         })
       );
@@ -291,6 +336,7 @@ const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
     } else {
       if (isBroadcasting) toggleDeviceGPS();
 
+      isSimulatingRef.current = true;
       setIsSimulating(true);
       simStepRef.current = 0;
       setSimStep(0);
@@ -311,9 +357,38 @@ const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
       clearInterval(simTimerRef.current);
       simTimerRef.current = null;
     }
+    isSimulatingRef.current = false;
     setIsSimulating(false);
     setSimPhase('auto');
     simPhaseRef.current = 'auto';
+
+    // Broadcast simulation teardown so all connected clients clean up this simulation's synthetic vehicles
+    if (channelRef.current && isConnectedRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'simulation_teardown',
+        payload: {
+          simulated_ids: SIMULATED_CAR_IDS,
+          stopped_at: new Date().toISOString(),
+        },
+      });
+    }
+
+    // Remove ONLY the specific synthetic IDs belonging to this simulation
+    setMembers((prev) => filterTeardownMembers(prev, SIMULATED_CAR_IDS));
+
+    // Reset myLocation back to real GPS fix if available, or default coordinates
+    if (hasRealGpsFixRef.current && realGpsLocationRef.current) {
+      setMyLocation(realGpsLocationRef.current);
+    } else {
+      setMyLocation({
+        latitude: 15.2993,
+        longitude: 74.1240,
+        speed_kmh: 0,
+        heading: 0,
+      });
+    }
+
     // Restore real trip convoy locations
     fetchLocations();
   };
@@ -484,8 +559,16 @@ const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
                 ghostModeRef.current = next;
                 if (isSimulating) {
                   executeSimulationStep(simStepRef.current);
-                } else if (isBroadcasting) {
-                  emitTelemetryPing({ ...myLocation, is_ghost_mode: next });
+                } else {
+                  const telemetryToEmit = getEffectiveGpsTelemetry(
+                    isBroadcasting,
+                    hasRealGpsFixRef.current,
+                    realGpsLocationRef.current,
+                    next
+                  );
+                  if (telemetryToEmit) {
+                    emitTelemetryPing(telemetryToEmit);
+                  }
                 }
               }}
               style={{ cursor: 'pointer', width: '18px', height: '18px' }}

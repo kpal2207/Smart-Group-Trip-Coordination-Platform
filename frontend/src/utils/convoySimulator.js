@@ -36,9 +36,9 @@ export const SIMULATED_FLEET_CONFIG = [
 const HEADING_COS = 0.8480;
 const HEADING_SIN = 0.5299;
 
-// Degrees latitude/longitude per step at ~75 km/h with 3-second ticks
-const STEP_LAT_DELTA = 0.0008;
-const STEP_LNG_DELTA = 0.0005;
+/// Degrees latitude/longitude per step at ~75 km/h with 3-second ticks (62.5 m / tick)
+const STEP_LAT_DELTA = 0.00048;
+const STEP_LNG_DELTA = 0.00031;
 
 /**
  * Calculates deterministic trailing lag factor for Car 4 based on step or forced phase.
@@ -117,20 +117,41 @@ export function getCar4LagConfig(step = 0, forcedPhase = null) {
  * @returns {{
  *   vehicles: Array<Object>,
  *   leadVehicle: Object,
- *   car4LagKm: number,
+ *   laggingVehicles: Array<Object>,
+ *   car4LagKm: number|null,
  *   isWarningActive: boolean,
  *   phaseName: string,
- *   step: number
+ *   step: number,
+ *   stepIndex: number
  * }}
  */
 export function generateConvoySimulationStep(step = 0, options = {}) {
   const { forcedPhase = null, ghostMode = false, ghostCarId = null } = options;
+
+  const isCarGhost = (id) => {
+    if (ghostCarId) {
+      return id === ghostCarId;
+    }
+    return Boolean(ghostMode && id === 'sim-car-3');
+  };
+
+  const applyGhostMasking = (vehicle) => {
+    if (vehicle.is_ghost_mode) {
+      vehicle.latitude = null;
+      vehicle.longitude = null;
+      vehicle.lat = null;
+      vehicle.lng = null;
+      vehicle.coordinates = null;
+      vehicle.location_status = 'hidden';
+    }
+  };
 
   // 1. Compute Lead Car position along the highway
   const leadLat = HIGHWAY_ORIGIN.latitude + step * STEP_LAT_DELTA;
   const leadLng = HIGHWAY_ORIGIN.longitude + step * STEP_LNG_DELTA;
   const nowIso = new Date().toISOString();
 
+  const leadGhost = isCarGhost(SIMULATED_FLEET_CONFIG[0].id);
   const leadVehicle = {
     user_id: SIMULATED_FLEET_CONFIG[0].id,
     id: SIMULATED_FLEET_CONFIG[0].id,
@@ -143,11 +164,12 @@ export function generateConvoySimulationStep(step = 0, options = {}) {
     coordinates: [Number(leadLat.toFixed(6)), Number(leadLng.toFixed(6))],
     speed_kmh: SIMULATED_FLEET_CONFIG[0].baseSpeed,
     heading: HIGHWAY_ORIGIN.heading,
-    is_ghost_mode: ghostCarId === SIMULATED_FLEET_CONFIG[0].id,
-    location_status: ghostCarId === SIMULATED_FLEET_CONFIG[0].id ? 'hidden' : 'fresh',
+    is_ghost_mode: leadGhost,
+    location_status: leadGhost ? 'hidden' : 'fresh',
     distance_to_leader_km: 0.0,
     recorded_at: nowIso,
   };
+  applyGhostMasking(leadVehicle);
 
   // 2. Compute Car 2 position (~0.35 km behind leader along heading vector)
   const car2Lat = leadLat - 0.0031 * HEADING_COS;
@@ -156,6 +178,7 @@ export function generateConvoySimulationStep(step = 0, options = {}) {
     { latitude: leadLat, longitude: leadLng },
     { latitude: car2Lat, longitude: car2Lng }
   );
+  const car2Ghost = isCarGhost(SIMULATED_FLEET_CONFIG[1].id);
 
   const car2Vehicle = {
     user_id: SIMULATED_FLEET_CONFIG[1].id,
@@ -169,11 +192,12 @@ export function generateConvoySimulationStep(step = 0, options = {}) {
     coordinates: [Number(car2Lat.toFixed(6)), Number(car2Lng.toFixed(6))],
     speed_kmh: SIMULATED_FLEET_CONFIG[1].baseSpeed,
     heading: HIGHWAY_ORIGIN.heading,
-    is_ghost_mode: ghostCarId === SIMULATED_FLEET_CONFIG[1].id,
-    location_status: ghostCarId === SIMULATED_FLEET_CONFIG[1].id ? 'hidden' : 'fresh',
-    distance_to_leader_km: Number((car2Dist || 0.35).toFixed(2)),
+    is_ghost_mode: car2Ghost,
+    location_status: car2Ghost ? 'hidden' : 'fresh',
+    distance_to_leader_km: leadGhost || car2Ghost ? null : Number((car2Dist || 0.35).toFixed(2)),
     recorded_at: nowIso,
   };
+  applyGhostMasking(car2Vehicle);
 
   // 3. Compute Car 3 position (~0.70 km behind leader)
   const car3Lat = leadLat - 0.0063 * HEADING_COS;
@@ -182,6 +206,7 @@ export function generateConvoySimulationStep(step = 0, options = {}) {
     { latitude: leadLat, longitude: leadLng },
     { latitude: car3Lat, longitude: car3Lng }
   );
+  const car3Ghost = isCarGhost(SIMULATED_FLEET_CONFIG[2].id);
 
   const car3Vehicle = {
     user_id: SIMULATED_FLEET_CONFIG[2].id,
@@ -195,20 +220,12 @@ export function generateConvoySimulationStep(step = 0, options = {}) {
     coordinates: [Number(car3Lat.toFixed(6)), Number(car3Lng.toFixed(6))],
     speed_kmh: SIMULATED_FLEET_CONFIG[2].baseSpeed,
     heading: HIGHWAY_ORIGIN.heading,
-    is_ghost_mode: ghostMode || ghostCarId === SIMULATED_FLEET_CONFIG[2].id,
-    location_status: (ghostMode || ghostCarId === SIMULATED_FLEET_CONFIG[2].id) ? 'hidden' : 'fresh',
-    distance_to_leader_km: Number((car3Dist || 0.70).toFixed(2)),
+    is_ghost_mode: car3Ghost,
+    location_status: car3Ghost ? 'hidden' : 'fresh',
+    distance_to_leader_km: leadGhost || car3Ghost ? null : Number((car3Dist || 0.70).toFixed(2)),
     recorded_at: nowIso,
   };
-
-  // If Ghost Mode is active on Car 3, mask coordinates
-  if (car3Vehicle.is_ghost_mode) {
-    car3Vehicle.latitude = null;
-    car3Vehicle.longitude = null;
-    car3Vehicle.lat = null;
-    car3Vehicle.lng = null;
-    car3Vehicle.coordinates = null;
-  }
+  applyGhostMasking(car3Vehicle);
 
   // 4. Compute Car 4 position (lagging vehicle)
   const { lagFactor, phaseName, car4Speed } = getCar4LagConfig(step, forcedPhase);
@@ -218,8 +235,10 @@ export function generateConvoySimulationStep(step = 0, options = {}) {
     { latitude: leadLat, longitude: leadLng },
     { latitude: car4Lat, longitude: car4Lng }
   );
-  const car4LagKm = Number((car4Dist || 0).toFixed(2));
-  const isWarningActive = car4LagKm > DEFAULT_CONVOY_LAG_THRESHOLD_KM;
+  const rawLagKm = Number((car4Dist || 0).toFixed(2));
+  const car4Ghost = isCarGhost(SIMULATED_FLEET_CONFIG[3].id);
+  const car4LagKm = leadGhost || car4Ghost ? null : rawLagKm;
+  const isWarningActive = !leadGhost && !car4Ghost && rawLagKm > DEFAULT_CONVOY_LAG_THRESHOLD_KM;
 
   const car4Vehicle = {
     user_id: SIMULATED_FLEET_CONFIG[3].id,
@@ -233,20 +252,119 @@ export function generateConvoySimulationStep(step = 0, options = {}) {
     coordinates: [Number(car4Lat.toFixed(6)), Number(car4Lng.toFixed(6))],
     speed_kmh: car4Speed,
     heading: HIGHWAY_ORIGIN.heading,
-    is_ghost_mode: ghostCarId === SIMULATED_FLEET_CONFIG[3].id,
-    location_status: ghostCarId === SIMULATED_FLEET_CONFIG[3].id ? 'hidden' : 'fresh',
+    is_ghost_mode: car4Ghost,
+    location_status: car4Ghost ? 'hidden' : 'fresh',
     distance_to_leader_km: car4LagKm,
     recorded_at: nowIso,
   };
+  applyGhostMasking(car4Vehicle);
 
   const vehicles = [leadVehicle, car2Vehicle, car3Vehicle, car4Vehicle];
+  const laggingVehicles = isWarningActive && !car4Vehicle.is_ghost_mode ? [car4Vehicle] : [];
 
   return {
     vehicles,
     leadVehicle,
+    laggingVehicles,
     car4LagKm,
     isWarningActive,
     phaseName,
     step,
+    stepIndex: step,
+  };
+}
+
+export const SIMULATED_CAR_IDS = ['sim-car-1', 'sim-car-2', 'sim-car-3', 'sim-car-4'];
+
+/**
+ * Filters out only the specific simulated vehicle IDs from a members list upon simulation teardown.
+ * Preserves real members and any unrelated simulated sessions.
+ *
+ * @param {Array<Object>} members
+ * @param {Array<string>} teardownIds
+ * @returns {Array<Object>}
+ */
+export function filterTeardownMembers(members, teardownIds = SIMULATED_CAR_IDS) {
+  if (!Array.isArray(members)) return [];
+  if (!Array.isArray(teardownIds) || teardownIds.length === 0) {
+    return [...members];
+  }
+  const idSet = new Set(teardownIds);
+  return members.filter((member) => !idSet.has(member?.user_id));
+}
+
+/**
+ * Handles incoming fetched convoy locations from the backend.
+ * Ensures that late or stale backend responses do not overwrite an active simulation.
+ *
+ * @param {Array<Object>} currentMembers
+ * @param {Array<Object>} fetchedLocations
+ * @param {boolean} isSimulating
+ * @returns {Array<Object>}
+ */
+export function processFetchedConvoyLocations(currentMembers, fetchedLocations, isSimulating) {
+  if (isSimulating) {
+    return currentMembers;
+  }
+  return Array.isArray(fetchedLocations) ? fetchedLocations : [];
+}
+
+/**
+ * Broadcasts simulation state to connected peers using a distinct Realtime event.
+ * Uses 'simulation_ping' to keep fake vehicle coordinates completely separate from real live GPS telemetry.
+ *
+ * @param {Object} channel - Supabase Realtime channel
+ * @param {Object} stepResult - Result from generateConvoySimulationStep
+ * @param {boolean} isConnected - Current connection status ref
+ * @returns {boolean} True if broadcast was sent, false otherwise
+ */
+export function broadcastConvoySimulation(channel, stepResult, isConnected) {
+  if (!channel || !isConnected || !stepResult || !Array.isArray(stepResult.vehicles)) {
+    return false;
+  }
+  stepResult.vehicles.forEach((veh) => {
+    channel.send({
+      type: 'broadcast',
+      event: 'simulation_ping',
+      payload: {
+        user_id: veh.user_id,
+        name: veh.name,
+        latitude: veh.latitude,
+        longitude: veh.longitude,
+        speed_kmh: veh.speed_kmh,
+        heading: veh.heading,
+        is_ghost_mode: Boolean(veh.is_ghost_mode),
+        is_simulated: true,
+        step: stepResult.step,
+        recorded_at: veh.recorded_at || new Date().toISOString(),
+      },
+    });
+  });
+  return true;
+}
+
+/**
+ * Pure helper to validate and format real device GPS telemetry before emitting.
+ * Guarantees that synthetic coordinates can NEVER be sent as real GPS telemetry.
+ *
+ * @param {boolean} isBroadcasting
+ * @param {boolean} hasRealGpsFix
+ * @param {Object|null} realGpsLocation
+ * @param {boolean} ghostMode
+ * @returns {Object|null}
+ */
+export function getEffectiveGpsTelemetry(isBroadcasting, hasRealGpsFix, realGpsLocation, ghostMode) {
+  if (!isBroadcasting || !hasRealGpsFix || !realGpsLocation) {
+    return null;
+  }
+  if (realGpsLocation.latitude == null || realGpsLocation.longitude == null) {
+    return null;
+  }
+  return {
+    latitude: Number(realGpsLocation.latitude),
+    longitude: Number(realGpsLocation.longitude),
+    speed_kmh: Number(realGpsLocation.speed_kmh || 0),
+    heading: Number(realGpsLocation.heading || 0),
+    is_ghost_mode: Boolean(ghostMode),
   };
 }

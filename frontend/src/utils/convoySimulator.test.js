@@ -6,6 +6,11 @@ import {
   getCar4LagConfig,
   SIMULATED_FLEET_CONFIG,
   HIGHWAY_ORIGIN,
+  SIMULATED_CAR_IDS,
+  filterTeardownMembers,
+  processFetchedConvoyLocations,
+  broadcastConvoySimulation,
+  getEffectiveGpsTelemetry,
 } from './convoySimulator.js';
 import { calculateHaversineDistance, DEFAULT_CONVOY_LAG_THRESHOLD_KM } from './geolocation.js';
 
@@ -164,7 +169,7 @@ describe('4-Car Convoy Highway Simulator (Sprint 2 Issue #3)', () => {
   });
 
   describe('Ghost Mode & Privacy Safety', () => {
-    it('should mask coordinates when vehicle is in Ghost Mode', () => {
+    it('should mask coordinates when default ghostMode toggle is ON (sim-car-3)', () => {
       const { vehicles } = generateConvoySimulationStep(0, { ghostMode: true });
       const ghostCar = vehicles[2]; // Car 3 is assigned to user/ghost mode
 
@@ -175,6 +180,264 @@ describe('4-Car Convoy Highway Simulator (Sprint 2 Issue #3)', () => {
       assert.equal(ghostCar.lng, null);
       assert.equal(ghostCar.coordinates, null);
       assert.equal(ghostCar.location_status, 'hidden');
+    });
+
+    it('should mask coordinates for Lead Car when ghostCarId is sim-car-1', () => {
+      const { vehicles, leadVehicle } = generateConvoySimulationStep(0, { ghostCarId: 'sim-car-1' });
+
+      assert.equal(leadVehicle.is_ghost_mode, true);
+      assert.equal(leadVehicle.latitude, null);
+      assert.equal(leadVehicle.longitude, null);
+      assert.equal(leadVehicle.lat, null);
+      assert.equal(leadVehicle.lng, null);
+      assert.equal(leadVehicle.coordinates, null);
+      assert.equal(leadVehicle.location_status, 'hidden');
+
+      assert.equal(vehicles[0].latitude, null);
+      assert.equal(vehicles[0].location_status, 'hidden');
+
+      // Other vehicles remain unmasked
+      assert.equal(vehicles[1].is_ghost_mode, false);
+      assert.ok(typeof vehicles[1].latitude === 'number');
+    });
+
+    it('should mask coordinates for Car 2 when ghostCarId is sim-car-2', () => {
+      const { vehicles } = generateConvoySimulationStep(0, { ghostCarId: 'sim-car-2' });
+      const car2 = vehicles[1];
+
+      assert.equal(car2.is_ghost_mode, true);
+      assert.equal(car2.latitude, null);
+      assert.equal(car2.longitude, null);
+      assert.equal(car2.lat, null);
+      assert.equal(car2.lng, null);
+      assert.equal(car2.coordinates, null);
+      assert.equal(car2.location_status, 'hidden');
+
+      // Lead car remains unmasked
+      assert.equal(vehicles[0].is_ghost_mode, false);
+      assert.ok(typeof vehicles[0].latitude === 'number');
+    });
+
+    it('should mask coordinates for Car 3 when ghostCarId is sim-car-3', () => {
+      const { vehicles } = generateConvoySimulationStep(0, { ghostCarId: 'sim-car-3' });
+      const car3 = vehicles[2];
+
+      assert.equal(car3.is_ghost_mode, true);
+      assert.equal(car3.latitude, null);
+      assert.equal(car3.longitude, null);
+      assert.equal(car3.lat, null);
+      assert.equal(car3.lng, null);
+      assert.equal(car3.coordinates, null);
+      assert.equal(car3.location_status, 'hidden');
+    });
+
+    it('should mask coordinates for Car 4 when ghostCarId is sim-car-4', () => {
+      const { vehicles } = generateConvoySimulationStep(0, { ghostCarId: 'sim-car-4' });
+      const car4 = vehicles[3];
+
+      assert.equal(car4.is_ghost_mode, true);
+      assert.equal(car4.latitude, null);
+      assert.equal(car4.longitude, null);
+      assert.equal(car4.lat, null);
+      assert.equal(car4.lng, null);
+      assert.equal(car4.coordinates, null);
+      assert.equal(car4.location_status, 'hidden');
+    });
+
+    it('should exclude hidden Car 4 from lag calculation and alert during warning phase', () => {
+      // Step 18 is normally separation warning (> 2.0 km)
+      const normalWarning = generateConvoySimulationStep(18);
+      assert.equal(normalWarning.isWarningActive, true);
+      assert.equal(normalWarning.laggingVehicles.length, 1);
+
+      // When Car 4 activates Ghost Mode during warning phase
+      const ghostWarning = generateConvoySimulationStep(18, { ghostCarId: 'sim-car-4' });
+      assert.equal(ghostWarning.vehicles[3].is_ghost_mode, true);
+      assert.equal(ghostWarning.vehicles[3].latitude, null);
+      assert.equal(ghostWarning.car4LagKm, null, 'Lag distance must be null when coordinates are hidden');
+      assert.equal(ghostWarning.isWarningActive, false, 'Warning must be suppressed when location is unknown');
+      assert.deepEqual(ghostWarning.laggingVehicles, [], 'Hidden vehicle must not appear in laggingVehicles');
+    });
+
+    it('should suppress warning when forcedPhase is warning but Car 4 is in Ghost Mode', () => {
+      const result = generateConvoySimulationStep(0, { forcedPhase: 'warning', ghostCarId: 'sim-car-4' });
+      assert.equal(result.isWarningActive, false);
+      assert.equal(result.car4LagKm, null);
+      assert.deepEqual(result.laggingVehicles, []);
+    });
+
+    it('should mask coordinates for Lead Car and suppress lag calculations for followers when Lead Car is in Ghost Mode', () => {
+      const { vehicles, leadVehicle, car4LagKm, isWarningActive, laggingVehicles } = generateConvoySimulationStep(18, { ghostCarId: 'sim-car-1' });
+
+      assert.equal(leadVehicle.is_ghost_mode, true);
+      assert.equal(leadVehicle.latitude, null);
+      assert.equal(leadVehicle.longitude, null);
+      assert.equal(leadVehicle.location_status, 'hidden');
+
+      // Followers cannot calculate lag relative to hidden leader
+      assert.equal(vehicles[1].distance_to_leader_km, null);
+      assert.equal(vehicles[2].distance_to_leader_km, null);
+      assert.equal(vehicles[3].distance_to_leader_km, null);
+      assert.equal(car4LagKm, null);
+      assert.equal(isWarningActive, false);
+      assert.deepEqual(laggingVehicles, []);
+    });
+  });
+
+  describe('Telemetry Event Payload & Leaflet Contract', () => {
+    it('should include step and stepIndex matching the executed step number', () => {
+      const step7 = generateConvoySimulationStep(7);
+      assert.equal(step7.step, 7);
+      assert.equal(step7.stepIndex, 7);
+
+      const step23 = generateConvoySimulationStep(23);
+      assert.equal(step23.step, 23);
+      assert.equal(step23.stepIndex, 23);
+    });
+
+    it('should populate laggingVehicles identifying Car 4 in separation warning phase', () => {
+      const warningResult = generateConvoySimulationStep(18);
+      assert.equal(warningResult.isWarningActive, true);
+      assert.equal(warningResult.laggingVehicles.length, 1);
+
+      const laggingCar = warningResult.laggingVehicles[0];
+      assert.equal(laggingCar.user_id, 'sim-car-4');
+      assert.equal(laggingCar.name, 'Car 4');
+      assert.ok(laggingCar.distance_to_leader_km > DEFAULT_CONVOY_LAG_THRESHOLD_KM);
+    });
+
+    it('should return empty laggingVehicles array during safe pack phase', () => {
+      const safeResult = generateConvoySimulationStep(4);
+      assert.equal(safeResult.isWarningActive, false);
+      assert.deepEqual(safeResult.laggingVehicles, []);
+    });
+  });
+
+  describe('Speed & Physics Calibration (~75 km/h over 3s ticks)', () => {
+    it('should advance vehicles at highway speed matching ~75 km/h (62.5 m / 3s tick)', () => {
+      const step0 = generateConvoySimulationStep(0);
+      const step1 = generateConvoySimulationStep(1);
+
+      const stepDistanceKm = calculateHaversineDistance(
+        step0.leadVehicle,
+        step1.leadVehicle
+      );
+
+      // Distance should be ~0.0628 km (62.8 meters per 3s = 75.4 km/h)
+      assert.ok(
+        stepDistanceKm >= 0.058 && stepDistanceKm <= 0.068,
+        `Expected ~0.0625 km per tick, got ${stepDistanceKm} km`
+      );
+
+      const impliedSpeedKmh = (stepDistanceKm / 3) * 3600;
+      assert.ok(
+        impliedSpeedKmh >= 70 && impliedSpeedKmh <= 80,
+        `Expected ~75 km/h, got ${impliedSpeedKmh.toFixed(1)} km/h`
+      );
+    });
+  });
+
+  describe('Simulation Cleanup & Teardown Architecture', () => {
+    it('should remove ONLY specific simulated IDs belonging to stopped simulation and preserve real members and other sessions', () => {
+      const mixedMembers = [
+        { user_id: 'real-user-101', name: 'Rahul', is_simulated: false, latitude: 15.30, longitude: 74.12 },
+        { user_id: 'real-user-102', name: 'Jay', is_simulated: false, latitude: 15.31, longitude: 74.13 },
+        { user_id: 'sim-car-1', name: 'Lead Car', is_simulated: true, latitude: 15.29, longitude: 74.12 },
+        { user_id: 'sim-car-2', name: 'Car 2', is_simulated: true, latitude: 15.28, longitude: 74.11 },
+        { user_id: 'sim-car-3', name: 'Car 3', is_simulated: true, latitude: 15.27, longitude: 74.10 },
+        { user_id: 'sim-car-4', name: 'Car 4', is_simulated: true, latitude: 15.25, longitude: 74.08 },
+        { user_id: 'other-session-car-99', name: 'Other Demo', is_simulated: true, latitude: 15.20, longitude: 74.00 },
+      ];
+
+      // Use the actual filterTeardownMembers implementation from convoySimulator.js
+      const cleaned = filterTeardownMembers(mixedMembers, SIMULATED_CAR_IDS);
+
+      assert.equal(cleaned.length, 3, 'Must retain 2 real members AND 1 unrelated simulated session');
+      assert.equal(cleaned[0].user_id, 'real-user-101');
+      assert.equal(cleaned[1].user_id, 'real-user-102');
+      assert.equal(cleaned[2].user_id, 'other-session-car-99', 'Must preserve unrelated simulated sessions');
+      assert.ok(!cleaned.some((m) => SIMULATED_CAR_IDS.includes(m.user_id)));
+    });
+
+    it('should safely handle empty teardown lists without modifying members', () => {
+      const members = [{ user_id: 'real-1' }, { user_id: 'sim-car-1' }];
+      assert.equal(filterTeardownMembers(members, []).length, 2);
+      assert.equal(filterTeardownMembers(null, SIMULATED_CAR_IDS).length, 0);
+    });
+
+    it('should reject stale backend fetch responses when isSimulating is active using processFetchedConvoyLocations', () => {
+      const activeSimMembers = generateConvoySimulationStep(5).vehicles;
+      const staleBackendResponse = [
+        { user_id: 'real-101', latitude: 15.1, longitude: 74.1 },
+      ];
+
+      // While simulation is running, late network response must be ignored
+      const resultWhileSimulating = processFetchedConvoyLocations(activeSimMembers, staleBackendResponse, true);
+      assert.deepEqual(resultWhileSimulating, activeSimMembers, 'Active simulation must not be overwritten');
+
+      // When simulation is stopped, network response should be accepted
+      const resultWhenStopped = processFetchedConvoyLocations([], staleBackendResponse, false);
+      assert.deepEqual(resultWhenStopped, staleBackendResponse, 'Real locations accepted when simulation is idle');
+    });
+
+    it('should broadcast simulation steps using distinct simulation_ping event (not telemetry_ping)', () => {
+      const sentPings = [];
+      const mockChannel = {
+        send: (msg) => sentPings.push(msg),
+      };
+
+      const stepResult = generateConvoySimulationStep(3);
+      const isConnected = true;
+
+      const success = broadcastConvoySimulation(mockChannel, stepResult, isConnected);
+
+      assert.equal(success, true);
+      assert.equal(sentPings.length, 4, 'Must broadcast all 4 vehicles');
+      sentPings.forEach((msg) => {
+        assert.equal(msg.type, 'broadcast');
+        assert.equal(msg.event, 'simulation_ping', 'Must use simulation_ping event to isolate from real telemetry');
+        assert.notEqual(msg.event, 'telemetry_ping', 'Must NEVER use real telemetry_ping event');
+        assert.equal(msg.payload.is_simulated, true);
+        assert.ok(SIMULATED_CAR_IDS.includes(msg.payload.user_id));
+      });
+    });
+
+    it('should defer simulation broadcast when channel is not connected (pending SUBSCRIBED)', () => {
+      const sentPings = [];
+      const mockChannel = {
+        send: (msg) => sentPings.push(msg),
+      };
+
+      const stepResult = generateConvoySimulationStep(0);
+      const isConnected = false;
+
+      const success = broadcastConvoySimulation(mockChannel, stepResult, isConnected);
+
+      assert.equal(success, false);
+      assert.equal(sentPings.length, 0, 'Must not broadcast while connection is pending');
+    });
+
+    it('should isolate real GPS and guarantee synthetic coordinates can never be sent as real GPS telemetry', () => {
+      // 1. Not broadcasting: returns null
+      assert.equal(getEffectiveGpsTelemetry(false, true, { latitude: 15.3, longitude: 74.1 }, false), null);
+
+      // 2. Broadcasting but no GPS fix: returns null
+      assert.equal(getEffectiveGpsTelemetry(true, false, { latitude: 15.3, longitude: 74.1 }, false), null);
+
+      // 3. Stopping simulation: hasRealGpsFix and realGpsLocation are null -> returns null
+      assert.equal(getEffectiveGpsTelemetry(false, false, null, false), null);
+
+      // 4. Synthetic coordinates cannot be emitted without a real GPS fix
+      assert.equal(getEffectiveGpsTelemetry(true, false, null, false), null);
+
+      // 5. Valid real device GPS fix emitting telemetry with ghost mode flag
+      const realFix = { latitude: 15.2993, longitude: 74.1240, speed_kmh: 52.4, heading: 45.0 };
+      const telemetry = getEffectiveGpsTelemetry(true, true, realFix, true);
+      assert.ok(telemetry !== null);
+      assert.equal(telemetry.latitude, 15.2993);
+      assert.equal(telemetry.longitude, 74.1240);
+      assert.equal(telemetry.speed_kmh, 52.4);
+      assert.equal(telemetry.is_ghost_mode, true);
     });
   });
 
