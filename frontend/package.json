@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build && node scripts/generate-sw-precache.mjs",
     "preview": "vite preview",
-    "test": "node --test src/utils/geolocation.test.js scripts/pwa-offline.test.mjs"
+    "test": "node --test src/utils/geolocation.test.js src/utils/convoySimulator.test.js scripts/pwa-offline.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.119.0",

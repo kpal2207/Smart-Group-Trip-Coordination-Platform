@@ -10,6 +10,14 @@ import {
   buildBroadcastTelemetryPayload,
   getValidConvoyVehicles,
 } from '../utils/geolocation';
+import {
+  generateConvoySimulationStep,
+  filterTeardownMembers,
+  processFetchedConvoyLocations,
+  broadcastConvoySimulation,
+  getEffectiveGpsTelemetry,
+  SIMULATED_CAR_IDS,
+} from '../utils/convoySimulator';
 import '../styles/convoy.css';
 
 // Helper to render accessible status pill for convoy member cards
@@ -27,7 +35,7 @@ const renderMemberStatusPill = (member, clock) => {
   return <span className="member-status-pill pill-fresh" aria-label="Status: Fresh">🟢 Fresh</span>;
 };
 
-const ConvoyTracker = ({ tripId, tripTitle }) => {
+const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
   const { user } = useContext(AuthContext);
 
   // Convoy Members state: Map of user_id -> member location object
@@ -39,13 +47,8 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
   const [isBroadcasting, setIsBroadcasting] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
   const [ghostMode, setGhostMode] = useState(false);
-  const ghostModeRef = useRef(ghostMode);
-
-  // Sync ref synchronously with state
-  useEffect(() => {
-    ghostModeRef.current = ghostMode;
-  }, [ghostMode]);
-
+  const [simPhase, setSimPhase] = useState('auto'); // 'auto' | 'safe' | 'warning' | 'regroup'
+  const [simStep, setSimStep] = useState(0);
   // Live clock: re-evaluates ping aging every 5s without requiring page reload
   const [clock, setClock] = useState(() => Date.now());
   useEffect(() => {
@@ -66,12 +69,29 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
   const channelRef = useRef(null);
   const simTimerRef = useRef(null);
   const geoWatchRef = useRef(null);
+  const simStepRef = useRef(0);
+  const simPhaseRef = useRef('auto');
+  const ghostModeRef = useRef(ghostMode);
+  const isConnectedRef = useRef(false);
+  const isSimulatingRef = useRef(false);
+  const hasRealGpsFixRef = useRef(false);
+  const realGpsLocationRef = useRef(null);
+
+  // Synchronize refs with state for timer interval closures
+  useEffect(() => {
+    ghostModeRef.current = ghostMode;
+  }, [ghostMode]);
+
+  useEffect(() => {
+    simPhaseRef.current = simPhase;
+  }, [simPhase]);
 
   // 1. Initial Load: Fetch latest convoy locations from backend
   const fetchLocations = async () => {
     try {
       const res = await getConvoyLocations(tripId);
-      setMembers(res.data || []);
+      // Guard against late network response overwriting active simulation
+      setMembers((prev) => processFetchedConvoyLocations(prev, res.data, isSimulatingRef.current));
     } catch (err) {
       console.warn('Failed to fetch initial convoy locations:', err);
     }
@@ -93,9 +113,10 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
 
     channelRef.current = channel;
 
-    // A. Listen for sub-second broadcast location pings from other vehicles
+    // A. Listen for sub-second broadcast location pings from REAL vehicles
     channel.on('broadcast', { event: 'telemetry_ping' }, ({ payload }) => {
-      if (!payload || !payload.user_id) return;
+      // Discard invalid or fake/simulated telemetry from real telemetry stream
+      if (!payload || !payload.user_id || payload.is_simulated) return;
 
       setMembers((prev) => {
         const existingIdx = prev.findIndex((m) => m.user_id === payload.user_id);
@@ -108,6 +129,7 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
           heading: payload.heading || null,
           is_ghost_mode: Boolean(payload.is_ghost_mode),
           location_status: payload.is_ghost_mode ? 'hidden' : 'fresh',
+          is_simulated: false,
           recorded_at: new Date().toISOString(),
         };
 
@@ -121,17 +143,53 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
       });
     });
 
-    // B. Listen for presence sync (who is currently connected to this convoy)
+    // B. Listen for distinct simulation pings from demo runs
+    channel.on('broadcast', { event: 'simulation_ping' }, ({ payload }) => {
+      if (!payload || !payload.user_id) return;
+
+      setMembers((prev) => {
+        const existingIdx = prev.findIndex((m) => m.user_id === payload.user_id);
+        const updatedItem = {
+          user_id: payload.user_id,
+          name: payload.name || 'Simulated Vehicle',
+          latitude: payload.is_ghost_mode ? null : payload.latitude,
+          longitude: payload.is_ghost_mode ? null : payload.longitude,
+          speed_kmh: payload.speed_kmh || 0,
+          heading: payload.heading || null,
+          is_ghost_mode: Boolean(payload.is_ghost_mode),
+          location_status: payload.is_ghost_mode ? 'hidden' : 'fresh',
+          is_simulated: true,
+          recorded_at: payload.recorded_at || new Date().toISOString(),
+        };
+
+        if (existingIdx >= 0) {
+          const next = [...prev];
+          next[existingIdx] = { ...next[existingIdx], ...updatedItem };
+          return next;
+        } else {
+          return [...prev, updatedItem];
+        }
+      });
+    });
+
+    // C. Listen for simulation teardown to purge specific synthetic vehicles across connected clients
+    channel.on('broadcast', { event: 'simulation_teardown' }, ({ payload }) => {
+      const simIds = payload?.simulated_ids || SIMULATED_CAR_IDS;
+      setMembers((prev) => filterTeardownMembers(prev, simIds));
+    });
+
+    // C. Listen for presence sync (who is currently connected to this convoy)
     channel.on('presence', { event: 'sync' }, () => {
       const presenceState = channel.presenceState();
       const onlineIds = new Set(Object.keys(presenceState).map(Number));
       setOnlinePresences(onlineIds);
     });
 
-    // C. Subscribe to the channel and track presence
+    // D. Subscribe to the channel and track presence
     channel.subscribe((status) => {
       if (status === 'SUBSCRIBED') {
         setIsConnected(true);
+        isConnectedRef.current = true;
         if (user?.id) {
           channel.track({
             user_id: user.id,
@@ -141,10 +199,12 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
         }
       } else {
         setIsConnected(false);
+        isConnectedRef.current = false;
       }
     });
 
     return () => {
+      isConnectedRef.current = false;
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
       }
@@ -159,7 +219,7 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
   const emitTelemetryPing = async (pingData) => {
     // A. Send sub-second Realtime broadcast to all convoy members
     // CRITICAL PRIVACY: Mask coordinates to null if Ghost Mode is active so raw GPS is never transmitted over WebSocket!
-    if (channelRef.current && isConnected) {
+    if (channelRef.current && isConnectedRef.current) {
       const broadcastPayload = buildBroadcastTelemetryPayload(user, pingData);
       channelRef.current.send({
         type: 'broadcast',
@@ -183,6 +243,8 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
         navigator.geolocation.clearWatch(geoWatchRef.current);
       }
       setIsBroadcasting(false);
+      hasRealGpsFixRef.current = false;
+      realGpsLocationRef.current = null;
     } else {
       if (!navigator.geolocation) {
         alert('Geolocation is not supported by your browser.');
@@ -201,51 +263,142 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
             heading: pos.coords.heading ? Number(pos.coords.heading.toFixed(1)) : 90.0,
             is_ghost_mode: currentGhost,
           };
+          hasRealGpsFixRef.current = true;
+          realGpsLocationRef.current = pingData;
           setMyLocation(pingData);
           emitTelemetryPing(pingData);
         },
         (err) => {
           console.error('GPS Watch error:', err);
           setIsBroadcasting(false);
+          hasRealGpsFixRef.current = false;
+          realGpsLocationRef.current = null;
         },
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
     }
   };
 
-  // 5. Start / Stop Simulated Convoy Drive (for testing without moving)
+  // 5. 4-Car Convoy Highway Simulation (Sprint 2 Issue #3)
+  const executeSimulationStep = (stepNumber, forcedPhaseVal) => {
+    const activePhase = forcedPhaseVal !== undefined
+      ? forcedPhaseVal
+      : (simPhaseRef.current === 'auto' ? null : simPhaseRef.current);
+
+    const stepResult = generateConvoySimulationStep(stepNumber, {
+      forcedPhase: activePhase,
+      ghostMode: ghostModeRef.current,
+    });
+
+    setMembers(stepResult.vehicles);
+    if (stepResult.leadVehicle && stepResult.leadVehicle.latitude != null) {
+      setMyLocation({
+        latitude: stepResult.leadVehicle.latitude,
+        longitude: stepResult.leadVehicle.longitude,
+        speed_kmh: stepResult.leadVehicle.speed_kmh,
+        heading: stepResult.leadVehicle.heading,
+      });
+    }
+
+    // Broadcast over Supabase Realtime via distinct simulation event
+    broadcastConvoySimulation(channelRef.current, stepResult, isConnectedRef.current);
+
+    // Dispatch custom DOM event for Jay's Leaflet map integration
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('convoy:telemetry_update', {
+          detail: {
+            tripId,
+            vehicles: stepResult.vehicles,
+            leadVehicle: stepResult.leadVehicle,
+            laggingVehicles: stepResult.laggingVehicles,
+            step: stepResult.step,
+            stepIndex: stepResult.step,
+            phaseName: stepResult.phaseName,
+            isWarningActive: stepResult.isWarningActive,
+            car4LagKm: stepResult.car4LagKm,
+          },
+        })
+      );
+    }
+
+    // Direct callback prop support for Jay's Leaflet map component
+    if (typeof onTelemetryUpdate === 'function') {
+      onTelemetryUpdate(stepResult.vehicles);
+    }
+
+    return stepResult;
+  };
+
   const toggleSimulation = () => {
     if (isSimulating) {
       stopSimulation();
     } else {
       if (isBroadcasting) toggleDeviceGPS();
 
+      isSimulatingRef.current = true;
       setIsSimulating(true);
-      let step = 0;
+      simStepRef.current = 0;
+      setSimStep(0);
+
+      // Execute step 0 immediately
+      executeSimulationStep(0);
+
       simTimerRef.current = setInterval(() => {
-        step += 1;
-        const currentGhost = ghostModeRef.current;
-        const currentSpeed = Math.floor(65 + Math.sin(step / 3) * 15);
-        const latOffset = (step * 0.0012);
-        const lngOffset = (step * 0.0009);
-
-        const pingData = {
-          latitude: Number((15.2993 + latOffset).toFixed(6)),
-          longitude: Number((74.1240 + lngOffset).toFixed(6)),
-          speed_kmh: currentSpeed,
-          heading: Math.floor((45 + (step * 5)) % 360),
-          is_ghost_mode: currentGhost,
-        };
-
-        setMyLocation(pingData);
-        emitTelemetryPing(pingData);
+        simStepRef.current += 1;
+        setSimStep(simStepRef.current);
+        executeSimulationStep(simStepRef.current);
       }, 3000);
     }
   };
 
   const stopSimulation = () => {
-    if (simTimerRef.current) clearInterval(simTimerRef.current);
+    if (simTimerRef.current) {
+      clearInterval(simTimerRef.current);
+      simTimerRef.current = null;
+    }
+    isSimulatingRef.current = false;
     setIsSimulating(false);
+    setSimPhase('auto');
+    simPhaseRef.current = 'auto';
+
+    // Broadcast simulation teardown so all connected clients clean up this simulation's synthetic vehicles
+    if (channelRef.current && isConnectedRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'simulation_teardown',
+        payload: {
+          simulated_ids: SIMULATED_CAR_IDS,
+          stopped_at: new Date().toISOString(),
+        },
+      });
+    }
+
+    // Remove ONLY the specific synthetic IDs belonging to this simulation
+    setMembers((prev) => filterTeardownMembers(prev, SIMULATED_CAR_IDS));
+
+    // Reset myLocation back to real GPS fix if available, or default coordinates
+    if (hasRealGpsFixRef.current && realGpsLocationRef.current) {
+      setMyLocation(realGpsLocationRef.current);
+    } else {
+      setMyLocation({
+        latitude: 15.2993,
+        longitude: 74.1240,
+        speed_kmh: 0,
+        heading: 0,
+      });
+    }
+
+    // Restore real trip convoy locations
+    fetchLocations();
+  };
+
+  const handlePhaseChange = (phase) => {
+    setSimPhase(phase);
+    simPhaseRef.current = phase;
+    if (isSimulating) {
+      executeSimulationStep(simStepRef.current, phase === 'auto' ? null : phase);
+    }
   };
 
   // 6. Centroid & Lag Calculations across visible vehicles
@@ -258,9 +411,12 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
       return { leader: null, validVehicles: [], laggingMembers: [], centroid: null };
     }
 
-    // Lead vehicle is the one with highest speed or foremost coordinate
+    // Lead vehicle is designated (sim-car-1 / is_lead) or the one with highest speed
+    const designatedLead = valid.find(
+      (m) => m.is_lead || m.user_id === 'sim-car-1' || m.name?.includes('Lead')
+    );
     const sorted = [...valid].sort((a, b) => (b.speed_kmh || 0) - (a.speed_kmh || 0));
-    const lead = sorted[0];
+    const lead = designatedLead || sorted[0];
 
     // Compute lag for each vehicle relative to the leader
     const lagging = [];
@@ -312,7 +468,7 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
 
       {/* Convoy Lag Alert Banner (Appears if someone falls > 2.0 km behind) */}
       {laggingMembers.length > 0 && (
-        <div className="convoy-lag-alert-banner">
+        <div className="convoy-lag-alert-banner" data-testid="convoy-lag-alert-banner">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5">
             <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
             <line x1="12" y1="9" x2="12" y2="13" />
@@ -374,7 +530,9 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
         <div className="convoy-control-card">
           <div>
             <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>Highway Simulation</div>
-            <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Test multi-vehicle motion</div>
+            <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+              {isSimulating ? `Active (Step ${(simStep % 30) + 1}/30)` : '4-Vehicle NH66 Drive'}
+            </div>
           </div>
           <button
             type="button"
@@ -399,8 +557,18 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
                 const next = e.target.checked;
                 setGhostMode(next);
                 ghostModeRef.current = next;
-                if (isBroadcasting || isSimulating) {
-                  emitTelemetryPing({ ...myLocation, is_ghost_mode: next });
+                if (isSimulating) {
+                  executeSimulationStep(simStepRef.current);
+                } else {
+                  const telemetryToEmit = getEffectiveGpsTelemetry(
+                    isBroadcasting,
+                    hasRealGpsFixRef.current,
+                    realGpsLocationRef.current,
+                    next
+                  );
+                  if (telemetryToEmit) {
+                    emitTelemetryPing(telemetryToEmit);
+                  }
                 }
               }}
               style={{ cursor: 'pointer', width: '18px', height: '18px' }}
@@ -408,6 +576,46 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
           </label>
         </div>
       </div>
+
+      {/* Simulation Scenario Controller Bar */}
+      {isSimulating && (
+        <div className="convoy-sim-scenario-bar" data-testid="sim-scenario-bar">
+          <div className="convoy-sim-scenario-info">
+            <span className="sim-badge">4-CAR SIMULATOR</span>
+            <span className="sim-route-text">Route: NH66 Goa • Step {(simStep % 30) + 1} of 30</span>
+          </div>
+          <div className="convoy-sim-scenario-buttons">
+            <button
+              type="button"
+              className={`sim-phase-btn ${simPhase === 'auto' ? 'active' : ''}`}
+              onClick={() => handlePhaseChange('auto')}
+            >
+              Auto Highway Loop
+            </button>
+            <button
+              type="button"
+              className={`sim-phase-btn ${simPhase === 'safe' ? 'active' : ''}`}
+              onClick={() => handlePhaseChange('safe')}
+            >
+              Safe Pack (&lt;0.6 km)
+            </button>
+            <button
+              type="button"
+              className={`sim-phase-btn ${simPhase === 'warning' ? 'active' : ''}`}
+              onClick={() => handlePhaseChange('warning')}
+            >
+              Trigger Lag (&gt;2.0 km)
+            </button>
+            <button
+              type="button"
+              className={`sim-phase-btn ${simPhase === 'regroup' ? 'active' : ''}`}
+              onClick={() => handlePhaseChange('regroup')}
+            >
+              Regroup (&lt;1.5 km)
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Body: Radar Display + Convoy Member Roster */}
       <div className="convoy-body-grid">
@@ -472,7 +680,7 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
                     fontWeight="700"
                     filter="drop-shadow(0 1px 2px rgba(0,0,0,0.8))"
                   >
-                    {veh.name?.split(' ')[0]} {isLead ? '★' : ''}
+                    {isLead ? 'Lead ★' : (veh.name || `Car ${idx + 1}`)}
                   </text>
                 </g>
               );
@@ -528,7 +736,7 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
                             width: '8px',
                             height: '8px',
                             borderRadius: '50%',
-                            background: isOnline ? '#10b981' : '#64748b',
+                            background: isOnline || isSimulating ? '#10b981' : '#64748b',
                             display: 'inline-block',
                           }}
                           title={isOnline ? 'Online in Realtime Channel' : 'Offline'}
