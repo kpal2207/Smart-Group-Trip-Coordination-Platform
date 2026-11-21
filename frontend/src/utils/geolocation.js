@@ -388,3 +388,86 @@ export function formatDistance(distanceKm) {
   return `${d.toFixed(1)} km`;
 }
 
+/**
+ * Computes telemetry status based on recording age and privacy settings.
+ * - 'hidden' if member is in Ghost Mode
+ * - 'fresh' if last ping is <= 60 seconds old
+ * - 'stale' if last ping is between 60 seconds and 300 seconds (5 min) old
+ * - 'unavailable' if older than 300 seconds (5 min) or no ping recorded
+ *
+ * @param {Object} member
+ * @param {Date|number|string} [currentTime=new Date()]
+ * @returns {'fresh'|'stale'|'unavailable'|'hidden'}
+ */
+export function getMemberLocationStatus(member, currentTime = new Date()) {
+  if (!member) return 'unavailable';
+  if (member.is_ghost_mode || member.location_status === 'hidden') {
+    return 'hidden';
+  }
+  if (!member.recorded_at) {
+    return member.location_status || (member.latitude != null ? 'fresh' : 'unavailable');
+  }
+
+  const recordedMs = new Date(member.recorded_at).getTime();
+  if (Number.isNaN(recordedMs)) {
+    return member.location_status || 'unavailable';
+  }
+
+  const currentMs = new Date(currentTime).getTime();
+  const ageSeconds = (currentMs - recordedMs) / 1000;
+
+  if (ageSeconds <= 60) {
+    return 'fresh';
+  }
+  if (ageSeconds <= 300) {
+    return 'stale';
+  }
+  return 'unavailable';
+}
+
+/**
+ * Sanitizes telemetry payload for real-time broadcast.
+ * Guarantees that when Ghost Mode is active, coordinates are masked to null
+ * BEFORE leaving the client over WebSockets / Realtime channels.
+ *
+ * @param {Object} user
+ * @param {Object} pingData
+ * @returns {Object} Broadcast-safe payload
+ */
+export function buildBroadcastTelemetryPayload(user, pingData) {
+  const isGhost = Boolean(pingData?.is_ghost_mode);
+  return {
+    user_id: user?.id,
+    name: user?.name,
+    ...pingData,
+    latitude: isGhost ? null : (pingData?.latitude ?? null),
+    longitude: isGhost ? null : (pingData?.longitude ?? null),
+    speed_kmh: pingData?.speed_kmh ?? 0,
+    heading: pingData?.heading ?? null,
+    is_ghost_mode: isGhost,
+    location_status: isGhost ? 'hidden' : 'fresh',
+    recorded_at: pingData?.recorded_at || new Date().toISOString(),
+  };
+}
+
+/**
+ * Filters convoy members down to active, valid vehicles for radar/map plotting,
+ * leader selection, centroid calculation, and lag alerts.
+ * Strictly limits valid vehicles to members with valid coordinates and
+ * a 'fresh' or 'stale' status (drops 'unavailable' and 'hidden' members).
+ *
+ * @param {Array<Object>} members
+ * @param {Date|number|string} [currentTime=new Date()]
+ * @returns {Array<Object>} Active vehicles with fresh or stale locations
+ */
+export function getValidConvoyVehicles(members, currentTime = new Date()) {
+  if (!Array.isArray(members)) return [];
+  return members.filter((m) => {
+    if (!m || m.latitude == null || m.longitude == null || m.is_ghost_mode) {
+      return false;
+    }
+    const status = getMemberLocationStatus(m, currentTime);
+    return status === 'fresh' || status === 'stale';
+  });
+}
+
