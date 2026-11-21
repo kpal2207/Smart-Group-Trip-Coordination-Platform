@@ -8,6 +8,7 @@ import {
   calculateConvoyCentroid,
   getMemberLocationStatus,
   buildBroadcastTelemetryPayload,
+  getValidConvoyVehicles,
 } from '../utils/geolocation';
 import '../styles/convoy.css';
 
@@ -249,10 +250,9 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
 
   // 6. Centroid & Lag Calculations across visible vehicles
   const { leader, validVehicles, laggingMembers, centroid } = useMemo(() => {
-    const valid = members.filter((m) => {
-      const status = getMemberLocationStatus(m, clock);
-      return m.latitude != null && m.longitude != null && !m.is_ghost_mode && status !== 'hidden';
-    });
+    // Limit validVehicles strictly to members with valid coordinates and 'fresh' or 'stale' status
+    // Drops 'unavailable' (>300s expired) and 'hidden' (ghost) members from radar, centroid, and lag alerts
+    const valid = getValidConvoyVehicles(members, clock);
 
     if (valid.length === 0) {
       return { leader: null, validVehicles: [], laggingMembers: [], centroid: null };

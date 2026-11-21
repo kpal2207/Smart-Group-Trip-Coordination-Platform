@@ -16,6 +16,7 @@ import {
   formatDistance,
   getMemberLocationStatus,
   buildBroadcastTelemetryPayload,
+  getValidConvoyVehicles,
 } from './geolocation.js';
 
 describe('Geolocation & GIS Utilities (Sprint 2)', () => {
@@ -470,6 +471,114 @@ describe('Geolocation & GIS Utilities (Sprint 2)', () => {
       assert.equal(getMemberLocationStatus(ghostMember, new Date('2026-11-20T12:00:10Z')), 'hidden');
       assert.equal(getMemberLocationStatus(ghostMember, new Date('2026-11-20T12:02:00Z')), 'hidden');
       assert.equal(getMemberLocationStatus(ghostMember, new Date('2026-11-20T12:10:00Z')), 'hidden');
+    });
+  });
+
+  describe('getValidConvoyVehicles & Expired Ping Drop-Out (Regression Test)', () => {
+    const baseTime = new Date('2026-11-21T10:00:00Z');
+
+    it('should drop an expired vehicle from validVehicles, centroid, and leader when clock advances past 300 seconds', () => {
+      const car1Lead = {
+        user_id: 1,
+        name: 'Lead Vehicle',
+        latitude: 15.3000,
+        longitude: 74.1200,
+        speed_kmh: 90.0,
+        is_ghost_mode: false,
+        recorded_at: baseTime.toISOString(),
+      };
+
+      const car2Follower = {
+        user_id: 2,
+        name: 'Trailing Vehicle',
+        latitude: 15.2700,
+        longitude: 74.1000,
+        speed_kmh: 80.0,
+        is_ghost_mode: false,
+        recorded_at: baseTime.toISOString(),
+      };
+
+      const members = [car1Lead, car2Follower];
+
+      // Phase 1: At T0 (0s elapsed), both vehicles are fresh
+      const validAtT0 = getValidConvoyVehicles(members, baseTime);
+      assert.equal(validAtT0.length, 2);
+      assert.deepEqual(validAtT0.map((v) => v.user_id), [1, 2]);
+
+      const centroidAtT0 = calculateConvoyCentroid(validAtT0);
+      assert.ok(centroidAtT0 !== null);
+      assert.equal(centroidAtT0.latitude, (15.3000 + 15.2700) / 2);
+      assert.equal(centroidAtT0.longitude, (74.1200 + 74.1000) / 2);
+
+      // Phase 2: Advance clock by 120s (2 minutes). Both are stale, but still fresh/stale
+      const timeAt120s = new Date(baseTime.getTime() + 120 * 1000);
+      const validAt120s = getValidConvoyVehicles(members, timeAt120s);
+      assert.equal(validAt120s.length, 2);
+
+      // Phase 3: Car 1 broadcasts a new ping at 300s, but Car 2 stops transmitting
+      const car1Updated = {
+        ...car1Lead,
+        latitude: 15.3200,
+        longitude: 74.1300,
+        speed_kmh: 92.0,
+        recorded_at: new Date(baseTime.getTime() + 300 * 1000).toISOString(),
+      };
+      const membersWithAgingCar2 = [car1Updated, car2Follower];
+
+      // Advance clock past 300s from Car 2's last ping (e.g., 305 seconds / 5m 5s)
+      const timeAt305s = new Date(baseTime.getTime() + 305 * 1000);
+
+      // Roster statuses: Car 1 is fresh, Car 2 is unavailable
+      assert.equal(getMemberLocationStatus(car1Updated, timeAt305s), 'fresh');
+      assert.equal(getMemberLocationStatus(car2Follower, timeAt305s), 'unavailable');
+
+      // REGRESSION VERIFICATION 1: Car 2 must DROP OUT of validVehicles
+      const validAt305s = getValidConvoyVehicles(membersWithAgingCar2, timeAt305s);
+      assert.equal(validAt305s.length, 1);
+      assert.equal(validAt305s[0].user_id, 1);
+
+      // REGRESSION VERIFICATION 2: Centroid strictly recalculates without the expired car
+      const centroidAt305s = calculateConvoyCentroid(validAt305s);
+      assert.ok(centroidAt305s !== null);
+      assert.equal(centroidAt305s.latitude, 15.3200);
+      assert.equal(centroidAt305s.longitude, 74.1300);
+
+      // REGRESSION VERIFICATION 3: Leader selection ignores the expired car
+      const sortedLeader = [...validAt305s].sort((a, b) => (b.speed_kmh || 0) - (a.speed_kmh || 0));
+      assert.equal(sortedLeader[0].user_id, 1);
+    });
+
+    it('should drop a vehicle immediately if it toggles Ghost Mode or has null coordinates', () => {
+      const activeCar = {
+        user_id: 1,
+        name: 'Active Car',
+        latitude: 15.3000,
+        longitude: 74.1200,
+        is_ghost_mode: false,
+        recorded_at: baseTime.toISOString(),
+      };
+
+      const ghostCar = {
+        user_id: 2,
+        name: 'Private Car',
+        latitude: 15.2800,
+        longitude: 74.1100,
+        is_ghost_mode: true,
+        recorded_at: baseTime.toISOString(),
+      };
+
+      const nullCoordCar = {
+        user_id: 3,
+        name: 'No GPS Car',
+        latitude: null,
+        longitude: null,
+        is_ghost_mode: false,
+        recorded_at: baseTime.toISOString(),
+      };
+
+      const valid = getValidConvoyVehicles([activeCar, ghostCar, nullCoordCar], baseTime);
+      assert.equal(valid.length, 1);
+      assert.equal(valid[0].user_id, 1);
     });
   });
 });

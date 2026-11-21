@@ -450,3 +450,24 @@ export function buildBroadcastTelemetryPayload(user, pingData) {
   };
 }
 
+/**
+ * Filters convoy members down to active, valid vehicles for radar/map plotting,
+ * leader selection, centroid calculation, and lag alerts.
+ * Strictly limits valid vehicles to members with valid coordinates and
+ * a 'fresh' or 'stale' status (drops 'unavailable' and 'hidden' members).
+ *
+ * @param {Array<Object>} members
+ * @param {Date|number|string} [currentTime=new Date()]
+ * @returns {Array<Object>} Active vehicles with fresh or stale locations
+ */
+export function getValidConvoyVehicles(members, currentTime = new Date()) {
+  if (!Array.isArray(members)) return [];
+  return members.filter((m) => {
+    if (!m || m.latitude == null || m.longitude == null || m.is_ghost_mode) {
+      return false;
+    }
+    const status = getMemberLocationStatus(m, currentTime);
+    return status === 'fresh' || status === 'stale';
+  });
+}
+
