@@ -5,11 +5,28 @@ import { submitTelemetry, getConvoyLocations } from '../api/telemetry';
 import {
   calculateHaversineDistance,
   DEFAULT_CONVOY_LAG_THRESHOLD_KM,
-  calculateConvoyCentroid,
+  getMemberLocationStatus,
+  buildBroadcastTelemetryPayload,
+  getValidConvoyVehicles,
 } from '../utils/geolocation';
 import { generateConvoySimulationStep } from '../utils/convoySimulator';
 import ConvoyMap from './ConvoyMap';
 import '../styles/convoy.css';
+
+// Helper to render accessible status pill for convoy member cards
+const renderMemberStatusPill = (member, clock) => {
+  const status = getMemberLocationStatus(member, clock);
+  if (status === 'hidden') {
+    return <span className="member-status-pill pill-ghost" aria-label="Status: Ghost Mode">🔒 Ghost</span>;
+  }
+  if (status === 'stale') {
+    return <span className="member-status-pill pill-stale" aria-label="Status: Stale">🟡 Stale</span>;
+  }
+  if (status === 'unavailable') {
+    return <span className="member-status-pill pill-unavailable" aria-label="Status: Unavailable">⚪ Unavailable</span>;
+  }
+  return <span className="member-status-pill pill-fresh" aria-label="Status: Fresh">🟢 Fresh</span>;
+};
 
 const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
   const { user } = useContext(AuthContext);
@@ -25,6 +42,14 @@ const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
   const [ghostMode, setGhostMode] = useState(false);
   const [simPhase, setSimPhase] = useState('auto'); // 'auto' | 'safe' | 'warning' | 'regroup'
   const [simStep, setSimStep] = useState(0);
+  // Live clock: re-evaluates ping aging every 5s without requiring page reload
+  const [clock, setClock] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setClock(Date.now());
+    }, 5000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Local current location state
   const [myLocation, setMyLocation] = useState({
@@ -39,7 +64,7 @@ const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
   const geoWatchRef = useRef(null);
   const simStepRef = useRef(0);
   const simPhaseRef = useRef('auto');
-  const ghostModeRef = useRef(false);
+  const ghostModeRef = useRef(ghostMode);
 
   // Synchronize refs with state for timer interval closures
   useEffect(() => {
@@ -141,15 +166,13 @@ const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
   // 3. Helper to broadcast a telemetry ping (to FastAPI + Supabase Realtime)
   const emitTelemetryPing = async (pingData) => {
     // A. Send sub-second Realtime broadcast to all convoy members
+    // CRITICAL PRIVACY: Mask coordinates to null if Ghost Mode is active so raw GPS is never transmitted over WebSocket!
     if (channelRef.current && isConnected) {
+      const broadcastPayload = buildBroadcastTelemetryPayload(user, pingData);
       channelRef.current.send({
         type: 'broadcast',
         event: 'telemetry_ping',
-        payload: {
-          user_id: user?.id,
-          name: user?.name,
-          ...pingData,
-        },
+        payload: broadcastPayload,
       });
     }
 
@@ -178,12 +201,13 @@ const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
       setIsBroadcasting(true);
       geoWatchRef.current = navigator.geolocation.watchPosition(
         (pos) => {
+          const currentGhost = ghostModeRef.current;
           const pingData = {
             latitude: Number(pos.coords.latitude.toFixed(6)),
             longitude: Number(pos.coords.longitude.toFixed(6)),
             speed_kmh: pos.coords.speed ? Number((pos.coords.speed * 3.6).toFixed(1)) : 45.0,
             heading: pos.coords.heading ? Number(pos.coords.heading.toFixed(1)) : 90.0,
-            is_ghost_mode: ghostMode,
+            is_ghost_mode: currentGhost,
           };
           setMyLocation(pingData);
           emitTelemetryPing(pingData);
@@ -302,12 +326,12 @@ const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
     }
   };
 
-  // 6. Centroid & Lag Calculations across visible vehicles
-  const { leader, validVehicles, laggingMembers, centroid } = useMemo(() => {
-    const valid = members.filter((m) => m.latitude != null && m.longitude != null && !m.is_ghost_mode);
+  // 6. Lag calculations use only fresh or stale positions.
+  const { leader, laggingMembers } = useMemo(() => {
+    const valid = getValidConvoyVehicles(members, clock);
 
     if (valid.length === 0) {
-      return { leader: null, validVehicles: [], laggingMembers: [], centroid: null };
+      return { leader: null, laggingMembers: [] };
     }
 
     // Lead vehicle is designated (sim-car-1 / is_lead) or the one with highest speed
@@ -334,9 +358,16 @@ const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
       }
     });
 
-    const cent = calculateConvoyCentroid(valid);
-    return { leader: lead, validVehicles: valid, laggingMembers: lagging, centroid: cent };
-  }, [members]);
+    return { leader: lead, laggingMembers: lagging };
+  }, [members, clock]);
+
+  const mapMembers = useMemo(() => members.map((member) => {
+    const status = getMemberLocationStatus(member, clock);
+    if (status === 'unavailable') {
+      return { ...member, latitude: null, longitude: null, location_status: status };
+    }
+    return status === member.location_status ? member : { ...member, location_status: status };
+  }), [members, clock]);
 
   return (
     <div className="convoy-tracker-container">
@@ -384,6 +415,29 @@ const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
           </div>
         </div>
       )}
+
+      {/* Telemetry Status Legend (Sprint 2 - Issue #4) */}
+      <div className="convoy-status-legend" role="region" aria-label="Convoy Telemetry Status Legend">
+        <div className="status-legend-title">Location Status Legend:</div>
+        <div className="status-legend-items">
+          <div className="status-legend-badge badge-fresh" title="Ping recorded within the last 60 seconds">
+            <span className="dot dot-fresh" aria-hidden="true" />
+            <span>Fresh (≤ 60s)</span>
+          </div>
+          <div className="status-legend-badge badge-stale" title="Ping recorded between 1 and 5 minutes ago">
+            <span className="dot dot-stale" aria-hidden="true" />
+            <span>Stale (1–5m)</span>
+          </div>
+          <div className="status-legend-badge badge-unavailable" title="No ping received in over 5 minutes or offline">
+            <span className="dot dot-unavailable" aria-hidden="true" />
+            <span>Unavailable (&gt; 5m)</span>
+          </div>
+          <div className="status-legend-badge badge-ghost" title="Privacy mode: coordinates are masked to null">
+            <span className="dot dot-ghost" aria-hidden="true" />
+            <span>Ghost Mode (Hidden)</span>
+          </div>
+        </div>
+      </div>
 
       {/* Control Actions Bar */}
       <div className="convoy-controls-grid">
@@ -487,9 +541,9 @@ const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
 
       {/* Main Body: Live Map + Convoy Member Roster */}
       <div className="convoy-body-grid">
-        {/* Live Convoy Map (Leaflet + OpenStreetMap), driven by the same `members` state */}
+        {/* Leaflet uses the tracker clock to remove expired positions. */}
         <div className="radar-display-panel convoy-map-panel">
-          <ConvoyMap members={members} leaderId={leader?.user_id} />
+          <ConvoyMap members={mapMembers} leaderId={leader?.user_id} />
         </div>
 
         {/* Convoy Roster & Metrics Feed */}
@@ -527,10 +581,11 @@ const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
                             background: isOnline || isSimulating ? '#10b981' : '#64748b',
                             display: 'inline-block',
                           }}
+                          title={isOnline ? 'Online in Realtime Channel' : 'Offline'}
                         />
                         {member.name}
                         {isLeader && <span style={{ color: '#38bdf8', fontSize: '0.75rem' }}>(Lead Vehicle)</span>}
-                        {member.is_ghost_mode && <span style={{ color: '#94a3b8', fontSize: '0.72rem' }}>[GHOST]</span>}
+                        {renderMemberStatusPill(member, clock)}
                       </div>
                       <div className="member-speed-badge">
                         {member.speed_kmh != null ? `${member.speed_kmh} km/h` : '0 km/h'}

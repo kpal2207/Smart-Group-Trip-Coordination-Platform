@@ -305,6 +305,113 @@
   border-radius: 6px;
 }
 
+/* Telemetry Status Legend & Badges (Sprint 2 - Issue #4) */
+.convoy-status-legend {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  background: rgba(30, 41, 59, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 10px 16px;
+  margin-bottom: 20px;
+  font-size: 0.8rem;
+}
+
+.status-legend-title {
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.74rem;
+}
+
+.status-legend-items {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.status-legend-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.status-legend-badge.badge-fresh {
+  background: rgba(16, 185, 129, 0.12);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.status-legend-badge.badge-stale {
+  background: rgba(245, 158, 11, 0.12);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.status-legend-badge.badge-unavailable {
+  background: rgba(148, 163, 184, 0.12);
+  color: #cbd5e1;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+.status-legend-badge.badge-ghost {
+  background: rgba(168, 85, 247, 0.12);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
+.status-legend-badge .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.dot-fresh { background: #10b981; }
+.dot-stale { background: #f59e0b; }
+.dot-unavailable { background: #94a3b8; }
+.dot-ghost { background: #a855f7; }
+
+/* Member Card Status Pills */
+.member-status-pill {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.member-status-pill.pill-fresh {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+}
+
+.member-status-pill.pill-stale {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+}
+
+.member-status-pill.pill-unavailable {
+  background: rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
+}
+
+.member-status-pill.pill-ghost {
+  background: rgba(168, 85, 247, 0.18);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.4);
+}
+
 .member-metrics-row {
   display: flex;
   align-items: center;
