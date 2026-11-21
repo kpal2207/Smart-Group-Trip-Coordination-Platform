@@ -5,11 +5,12 @@ import { submitTelemetry, getConvoyLocations } from '../api/telemetry';
 import {
   calculateHaversineDistance,
   DEFAULT_CONVOY_LAG_THRESHOLD_KM,
-  calculateConvoyCentroid,
   getMemberLocationStatus,
   buildBroadcastTelemetryPayload,
   getValidConvoyVehicles,
 } from '../utils/geolocation';
+import { generateConvoySimulationStep } from '../utils/convoySimulator';
+import ConvoyMap from './ConvoyMap';
 import '../styles/convoy.css';
 
 // Helper to render accessible status pill for convoy member cards
@@ -27,7 +28,7 @@ const renderMemberStatusPill = (member, clock) => {
   return <span className="member-status-pill pill-fresh" aria-label="Status: Fresh">🟢 Fresh</span>;
 };
 
-const ConvoyTracker = ({ tripId, tripTitle }) => {
+const ConvoyTracker = ({ tripId, tripTitle, onTelemetryUpdate }) => {
   const { user } = useContext(AuthContext);
 
   // Convoy Members state: Map of user_id -> member location object
@@ -39,13 +40,8 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
   const [isBroadcasting, setIsBroadcasting] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
   const [ghostMode, setGhostMode] = useState(false);
-  const ghostModeRef = useRef(ghostMode);
-
-  // Sync ref synchronously with state
-  useEffect(() => {
-    ghostModeRef.current = ghostMode;
-  }, [ghostMode]);
-
+  const [simPhase, setSimPhase] = useState('auto'); // 'auto' | 'safe' | 'warning' | 'regroup'
+  const [simStep, setSimStep] = useState(0);
   // Live clock: re-evaluates ping aging every 5s without requiring page reload
   const [clock, setClock] = useState(() => Date.now());
   useEffect(() => {
@@ -66,6 +62,18 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
   const channelRef = useRef(null);
   const simTimerRef = useRef(null);
   const geoWatchRef = useRef(null);
+  const simStepRef = useRef(0);
+  const simPhaseRef = useRef('auto');
+  const ghostModeRef = useRef(ghostMode);
+
+  // Synchronize refs with state for timer interval closures
+  useEffect(() => {
+    ghostModeRef.current = ghostMode;
+  }, [ghostMode]);
+
+  useEffect(() => {
+    simPhaseRef.current = simPhase;
+  }, [simPhase]);
 
   // 1. Initial Load: Fetch latest convoy locations from backend
   const fetchLocations = async () => {
@@ -213,7 +221,70 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
     }
   };
 
-  // 5. Start / Stop Simulated Convoy Drive (for testing without moving)
+  // 5. 4-Car Convoy Highway Simulation (Sprint 2 Issue #3)
+  const executeSimulationStep = (stepNumber, forcedPhaseVal) => {
+    const activePhase = forcedPhaseVal !== undefined
+      ? forcedPhaseVal
+      : (simPhaseRef.current === 'auto' ? null : simPhaseRef.current);
+
+    const stepResult = generateConvoySimulationStep(stepNumber, {
+      forcedPhase: activePhase,
+      ghostMode: ghostModeRef.current,
+    });
+
+    setMembers(stepResult.vehicles);
+    if (stepResult.leadVehicle && stepResult.leadVehicle.latitude != null) {
+      setMyLocation({
+        latitude: stepResult.leadVehicle.latitude,
+        longitude: stepResult.leadVehicle.longitude,
+        speed_kmh: stepResult.leadVehicle.speed_kmh,
+        heading: stepResult.leadVehicle.heading,
+      });
+    }
+
+    // Broadcast over Supabase Realtime if connected
+    if (channelRef.current && isConnected) {
+      stepResult.vehicles.forEach((veh) => {
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'telemetry_ping',
+          payload: {
+            user_id: veh.user_id,
+            name: veh.name,
+            latitude: veh.latitude,
+            longitude: veh.longitude,
+            speed_kmh: veh.speed_kmh,
+            heading: veh.heading,
+            is_ghost_mode: veh.is_ghost_mode,
+            is_simulated: true,
+          },
+        });
+      });
+    }
+
+    // Dispatch custom DOM event for Jay's Leaflet map integration
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('convoy:telemetry_update', {
+          detail: {
+            tripId,
+            vehicles: stepResult.vehicles,
+            leadVehicle: stepResult.leadVehicle,
+            laggingVehicles: stepResult.laggingVehicles,
+            stepIndex: stepResult.stepIndex,
+          },
+        })
+      );
+    }
+
+    // Direct callback prop support for Jay's Leaflet map component
+    if (typeof onTelemetryUpdate === 'function') {
+      onTelemetryUpdate(stepResult.vehicles);
+    }
+
+    return stepResult;
+  };
+
   const toggleSimulation = () => {
     if (isSimulating) {
       stopSimulation();
@@ -221,46 +292,54 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
       if (isBroadcasting) toggleDeviceGPS();
 
       setIsSimulating(true);
-      let step = 0;
+      simStepRef.current = 0;
+      setSimStep(0);
+
+      // Execute step 0 immediately
+      executeSimulationStep(0);
+
       simTimerRef.current = setInterval(() => {
-        step += 1;
-        const currentGhost = ghostModeRef.current;
-        const currentSpeed = Math.floor(65 + Math.sin(step / 3) * 15);
-        const latOffset = (step * 0.0012);
-        const lngOffset = (step * 0.0009);
-
-        const pingData = {
-          latitude: Number((15.2993 + latOffset).toFixed(6)),
-          longitude: Number((74.1240 + lngOffset).toFixed(6)),
-          speed_kmh: currentSpeed,
-          heading: Math.floor((45 + (step * 5)) % 360),
-          is_ghost_mode: currentGhost,
-        };
-
-        setMyLocation(pingData);
-        emitTelemetryPing(pingData);
+        simStepRef.current += 1;
+        setSimStep(simStepRef.current);
+        executeSimulationStep(simStepRef.current);
       }, 3000);
     }
   };
 
   const stopSimulation = () => {
-    if (simTimerRef.current) clearInterval(simTimerRef.current);
+    if (simTimerRef.current) {
+      clearInterval(simTimerRef.current);
+      simTimerRef.current = null;
+    }
     setIsSimulating(false);
+    setSimPhase('auto');
+    simPhaseRef.current = 'auto';
+    // Restore real trip convoy locations
+    fetchLocations();
   };
 
-  // 6. Centroid & Lag Calculations across visible vehicles
-  const { leader, validVehicles, laggingMembers, centroid } = useMemo(() => {
-    // Limit validVehicles strictly to members with valid coordinates and 'fresh' or 'stale' status
-    // Drops 'unavailable' (>300s expired) and 'hidden' (ghost) members from radar, centroid, and lag alerts
+  const handlePhaseChange = (phase) => {
+    setSimPhase(phase);
+    simPhaseRef.current = phase;
+    if (isSimulating) {
+      executeSimulationStep(simStepRef.current, phase === 'auto' ? null : phase);
+    }
+  };
+
+  // 6. Lag calculations use only fresh or stale positions.
+  const { leader, laggingMembers } = useMemo(() => {
     const valid = getValidConvoyVehicles(members, clock);
 
     if (valid.length === 0) {
-      return { leader: null, validVehicles: [], laggingMembers: [], centroid: null };
+      return { leader: null, laggingMembers: [] };
     }
 
-    // Lead vehicle is the one with highest speed or foremost coordinate
+    // Lead vehicle is designated (sim-car-1 / is_lead) or the one with highest speed
+    const designatedLead = valid.find(
+      (m) => m.is_lead || m.user_id === 'sim-car-1' || m.name?.includes('Lead')
+    );
     const sorted = [...valid].sort((a, b) => (b.speed_kmh || 0) - (a.speed_kmh || 0));
-    const lead = sorted[0];
+    const lead = designatedLead || sorted[0];
 
     // Compute lag for each vehicle relative to the leader
     const lagging = [];
@@ -279,9 +358,16 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
       }
     });
 
-    const cent = calculateConvoyCentroid(valid);
-    return { leader: lead, validVehicles: valid, laggingMembers: lagging, centroid: cent };
+    return { leader: lead, laggingMembers: lagging };
   }, [members, clock]);
+
+  const mapMembers = useMemo(() => members.map((member) => {
+    const status = getMemberLocationStatus(member, clock);
+    if (status === 'unavailable') {
+      return { ...member, latitude: null, longitude: null, location_status: status };
+    }
+    return status === member.location_status ? member : { ...member, location_status: status };
+  }), [members, clock]);
 
   return (
     <div className="convoy-tracker-container">
@@ -312,7 +398,7 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
 
       {/* Convoy Lag Alert Banner (Appears if someone falls > 2.0 km behind) */}
       {laggingMembers.length > 0 && (
-        <div className="convoy-lag-alert-banner">
+        <div className="convoy-lag-alert-banner" data-testid="convoy-lag-alert-banner">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5">
             <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
             <line x1="12" y1="9" x2="12" y2="13" />
@@ -374,7 +460,9 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
         <div className="convoy-control-card">
           <div>
             <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>Highway Simulation</div>
-            <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Test multi-vehicle motion</div>
+            <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+              {isSimulating ? `Active (Step ${(simStep % 30) + 1}/30)` : '4-Vehicle NH66 Drive'}
+            </div>
           </div>
           <button
             type="button"
@@ -399,7 +487,9 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
                 const next = e.target.checked;
                 setGhostMode(next);
                 ghostModeRef.current = next;
-                if (isBroadcasting || isSimulating) {
+                if (isSimulating) {
+                  executeSimulationStep(simStepRef.current);
+                } else if (isBroadcasting) {
                   emitTelemetryPing({ ...myLocation, is_ghost_mode: next });
                 }
               }}
@@ -409,91 +499,51 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
         </div>
       </div>
 
-      {/* Main Body: Radar Display + Convoy Member Roster */}
-      <div className="convoy-body-grid">
-        {/* Radar HUD Screen */}
-        <div className="radar-display-panel">
-          <svg className="radar-screen-svg" viewBox="0 0 340 340">
-            <defs>
-              <linearGradient id="sweepGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.4" />
-                <stop offset="100%" stopColor="#38bdf8" stopOpacity="0" />
-              </linearGradient>
-            </defs>
-
-            {/* Radar Background & Range Rings */}
-            <circle cx="170" cy="170" r="150" fill="none" stroke="rgba(56, 189, 248, 0.15)" strokeWidth="1.5" />
-            <circle cx="170" cy="170" r="105" fill="none" stroke="rgba(56, 189, 248, 0.15)" strokeWidth="1" strokeDasharray="4 4" />
-            <circle cx="170" cy="170" r="60" fill="none" stroke="rgba(56, 189, 248, 0.2)" strokeWidth="1" />
-            <circle cx="170" cy="170" r="18" fill="rgba(56, 189, 248, 0.1)" stroke="#38bdf8" strokeWidth="1.5" />
-
-            {/* Crosshairs */}
-            <line x1="170" y1="20" x2="170" y2="320" stroke="rgba(56, 189, 248, 0.15)" strokeWidth="1" />
-            <line x1="20" y1="170" x2="320" y2="170" stroke="rgba(56, 189, 248, 0.15)" strokeWidth="1" />
-
-            {/* Rotating Radar Sweep Line */}
-            <g className="radar-sweep-line">
-              <line x1="170" y1="170" x2="170" y2="20" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" />
-              <path d="M 170 170 L 170 20 A 150 150 0 0 1 276 64 Z" fill="url(#sweepGrad)" />
-            </g>
-
-            {/* Render Vehicle Markers relative to Centroid */}
-            {validVehicles.map((veh, idx) => {
-              // Calculate relative offset on radar canvas (scaling coordinates)
-              const refLat = centroid ? centroid.latitude : 15.2993;
-              const refLng = centroid ? centroid.longitude : 74.1240;
-              const xOffset = (veh.longitude - refLng) * 3500;
-              const yOffset = (veh.latitude - refLat) * -3500;
-
-              const clampedX = Math.max(35, Math.min(305, 170 + xOffset));
-              const clampedY = Math.max(35, Math.min(305, 170 + yOffset));
-              const isLead = leader && leader.user_id === veh.user_id;
-
-              return (
-                <g key={veh.user_id || idx} style={{ transition: 'all 0.4s ease-out' }}>
-                  {/* Halo pulse */}
-                  <circle cx={clampedX} cy={clampedY} r="12" fill={isLead ? 'rgba(56, 189, 248, 0.2)' : 'rgba(129, 140, 248, 0.2)'} />
-                  {/* Marker Dot */}
-                  <circle
-                    cx={clampedX}
-                    cy={clampedY}
-                    r="5"
-                    fill={isLead ? '#38bdf8' : '#a855f7'}
-                    stroke="#ffffff"
-                    strokeWidth="1.5"
-                  />
-                  {/* Vehicle Label Tag */}
-                  <text
-                    x={clampedX}
-                    y={clampedY - 9}
-                    textAnchor="middle"
-                    fill="#f8fafc"
-                    fontSize="9"
-                    fontWeight="700"
-                    filter="drop-shadow(0 1px 2px rgba(0,0,0,0.8))"
-                  >
-                    {veh.name?.split(' ')[0]} {isLead ? '★' : ''}
-                  </text>
-                </g>
-              );
-            })}
-          </svg>
-
-          {/* Radar Legend */}
-          <div className="radar-legend">
-            <div className="legend-item">
-              <span className="legend-dot" style={{ background: '#38bdf8' }} />
-              <span>Lead Vehicle (★)</span>
-            </div>
-            <div className="legend-item">
-              <span className="legend-dot" style={{ background: '#a855f7' }} />
-              <span>Convoy Member</span>
-            </div>
-            <div className="legend-item">
-              <span className="legend-dot" style={{ background: '#64748b' }} />
-              <span>Ghost (Hidden from Radar)</span>
-            </div>
+      {/* Simulation Scenario Controller Bar */}
+      {isSimulating && (
+        <div className="convoy-sim-scenario-bar" data-testid="sim-scenario-bar">
+          <div className="convoy-sim-scenario-info">
+            <span className="sim-badge">4-CAR SIMULATOR</span>
+            <span className="sim-route-text">Route: NH66 Goa • Step {(simStep % 30) + 1} of 30</span>
           </div>
+          <div className="convoy-sim-scenario-buttons">
+            <button
+              type="button"
+              className={`sim-phase-btn ${simPhase === 'auto' ? 'active' : ''}`}
+              onClick={() => handlePhaseChange('auto')}
+            >
+              Auto Highway Loop
+            </button>
+            <button
+              type="button"
+              className={`sim-phase-btn ${simPhase === 'safe' ? 'active' : ''}`}
+              onClick={() => handlePhaseChange('safe')}
+            >
+              Safe Pack (&lt;0.6 km)
+            </button>
+            <button
+              type="button"
+              className={`sim-phase-btn ${simPhase === 'warning' ? 'active' : ''}`}
+              onClick={() => handlePhaseChange('warning')}
+            >
+              Trigger Lag (&gt;2.0 km)
+            </button>
+            <button
+              type="button"
+              className={`sim-phase-btn ${simPhase === 'regroup' ? 'active' : ''}`}
+              onClick={() => handlePhaseChange('regroup')}
+            >
+              Regroup (&lt;1.5 km)
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Main Body: Live Map + Convoy Member Roster */}
+      <div className="convoy-body-grid">
+        {/* Leaflet uses the tracker clock to remove expired positions. */}
+        <div className="radar-display-panel convoy-map-panel">
+          <ConvoyMap members={mapMembers} leaderId={leader?.user_id} />
         </div>
 
         {/* Convoy Roster & Metrics Feed */}
@@ -528,7 +578,7 @@ const ConvoyTracker = ({ tripId, tripTitle }) => {
                             width: '8px',
                             height: '8px',
                             borderRadius: '50%',
-                            background: isOnline ? '#10b981' : '#64748b',
+                            background: isOnline || isSimulating ? '#10b981' : '#64748b',
                             display: 'inline-block',
                           }}
                           title={isOnline ? 'Online in Realtime Channel' : 'Offline'}

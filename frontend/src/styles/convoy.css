@@ -424,3 +424,323 @@
   color: #f1f5f9;
   font-weight: 500;
 }
+
+/* 4-Car Convoy Highway Simulation Controls (Sprint 2 Issue #3) */
+.convoy-sim-scenario-bar {
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.convoy-sim-scenario-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sim-badge {
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid #38bdf8;
+  color: #38bdf8;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.sim-route-text {
+  font-size: 0.8rem;
+  color: #cbd5e1;
+}
+
+.convoy-sim-scenario-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sim-phase-btn {
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  color: #cbd5e1;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.sim-phase-btn:hover {
+  background: rgba(51, 65, 85, 0.9);
+  color: #ffffff;
+  border-color: rgba(56, 189, 248, 0.5);
+}
+
+.sim-phase-btn.active {
+  background: #0284c7;
+  border-color: #38bdf8;
+  color: #ffffff;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
+}
+
+/* ==========================================================================
+   Live Convoy Map (Leaflet + OpenStreetMap)
+   leaflet/dist/leaflet.css is imported by ConvoyMap.jsx
+   ========================================================================== */
+
+/* Re-use the old radar panel slot, but let the map fill it */
+.radar-display-panel.convoy-map-panel {
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 12px;
+  min-width: 0; /* allow the grid column to shrink instead of overflowing */
+}
+
+.convoy-map-wrap {
+  position: relative;
+  z-index: 0;
+  isolation: isolate; /* keep Leaflet's high pane/control z-indexes inside this panel */
+  width: 100%;
+  min-width: 0;
+}
+
+.convoy-map-frame {
+  position: relative;
+  width: 100%;
+  height: 340px; /* explicit height: Leaflet renders nothing without one */
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  background: #0b1220;
+}
+
+@media (max-width: 600px) {
+  .convoy-map-frame {
+    height: 300px;
+  }
+}
+
+.convoy-map.leaflet-container {
+  width: 100%;
+  height: 100%;
+  background: #0b1220;
+  font-family: inherit;
+}
+
+/* "Fit convoy" button */
+.convoy-map-fit {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1000;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(56, 189, 248, 0.5);
+  background: rgba(15, 23, 42, 0.92);
+  color: #e2e8f0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.convoy-map-fit:hover:not(:disabled) {
+  background: #0284c7;
+  border-color: #38bdf8;
+  color: #ffffff;
+}
+
+.convoy-map-fit:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Empty state overlay */
+.convoy-map-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 16px;
+  text-align: center;
+  background: rgba(3, 7, 18, 0.55);
+  color: #e2e8f0;
+  font-size: 0.82rem;
+  pointer-events: none; /* map stays pannable underneath */
+}
+
+.convoy-map-empty strong {
+  font-size: 0.95rem;
+}
+
+.convoy-map-empty span {
+  color: #94a3b8;
+}
+
+/* Marker pins */
+.convoy-pin-icon {
+  background: none;
+  border: none;
+}
+
+.convoy-pin-icon svg {
+  display: block;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.45));
+}
+
+.convoy-pin-icon--ghost svg {
+  opacity: 0.9;
+}
+
+/* Permanent name labels */
+.leaflet-tooltip.convoy-map-label {
+  background: rgba(15, 23, 42, 0.92);
+  color: #f8fafc;
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  box-shadow: none;
+  white-space: nowrap;
+}
+
+.leaflet-tooltip-top.convoy-map-label::before {
+  border-top-color: rgba(15, 23, 42, 0.92);
+}
+
+/* Popups, themed for the dark dashboard */
+.convoy-map-popup .leaflet-popup-content-wrapper {
+  background: #0f172a;
+  color: #f8fafc;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.convoy-map-popup .leaflet-popup-content {
+  margin: 12px 14px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.convoy-map-popup .leaflet-popup-tip {
+  background: #0f172a;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+}
+
+.convoy-map-popup a.leaflet-popup-close-button {
+  color: #94a3b8;
+}
+
+.convoy-map-popup a.leaflet-popup-close-button:hover {
+  color: #ffffff;
+}
+
+.cm-popup-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin-bottom: 6px;
+  padding-right: 14px; /* clear the close button */
+}
+
+.cm-lead-tag {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #38bdf8;
+  border: 1px solid #38bdf8;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.cm-badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  border: 1px solid transparent;
+}
+
+.cm-badge--fresh {
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.15);
+  border-color: #10b981;
+}
+
+.cm-badge--stale {
+  color: #fde047;
+  background: rgba(234, 179, 8, 0.15);
+  border-color: #eab308;
+}
+
+.cm-badge--unavailable {
+  color: #e2e8f0;
+  background: rgba(148, 163, 184, 0.15);
+  border-color: #94a3b8;
+}
+
+.cm-badge--ghost {
+  color: #c4b5fd;
+  background: rgba(139, 92, 246, 0.15);
+  border-color: #8b5cf6;
+}
+
+.cm-popup-note {
+  margin: 8px 0 0;
+  font-size: 0.72rem;
+  color: #c4b5fd;
+}
+
+.cm-rows {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 10px 0 0;
+}
+
+.cm-rows dt {
+  color: #94a3b8;
+}
+
+.cm-rows dd {
+  margin: 0;
+  color: #f1f5f9;
+  font-weight: 500;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.convoy-map-panel .convoy-map-legend {
+  margin-top: 10px;
+}
+
+.convoy-map-note {
+  margin-top: 8px;
+  font-size: 0.74rem;
+  color: #94a3b8;
+  text-align: center;
+}
